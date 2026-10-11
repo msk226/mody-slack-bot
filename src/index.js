@@ -170,8 +170,6 @@ if (config.dailyInsightEnabled) {
       botId,
       reportChannelId: config.dailyReportChannelId,
       errorChannelId: config.errorChannelId,
-      githubRepo: config.githubRepo,
-      ghPath: config.ghPath,
       parseServerError,
       isIgnoredNoise,
       alertEnvironment,

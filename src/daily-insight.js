@@ -1,9 +1,6 @@
-import { execFile } from 'node:child_process';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { promisify } from 'node:util';
 
-const execFileAsync = promisify(execFile);
 const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
 const DAY_SECONDS = 24 * 60 * 60;
 
@@ -12,13 +9,6 @@ export const INSIGHT_TITLE = '데일리 인사이트';
 // daily_report.py의 report_text. 예전 리포트는 '데일리', 지금은 '일일'로 올라온다.
 const REPORT_TEXT = /^MODY (?:일일|데일리) 리포트 (\d{4}-\d{2}-\d{2})/;
 const TREND_EMOJI = { 'mody-up': '▲', 'mody-down': '▼', 'mody-flat': '–' };
-const RUN_RESULT_LABELS = {
-  success: '성공',
-  failure: '실패',
-  cancelled: '취소',
-  in_progress: '진행 중',
-  queued: '대기',
-};
 
 export function reportDateOf(message) {
   if (!message?.bot_id) return null;
@@ -117,23 +107,7 @@ export function summarizeErrorAlerts(messages, { parseServerError, isIgnoredNois
   return [`총 ${total}건 (${perEnvironment})`, ...top].join('\n');
 }
 
-export function summarizeDeploys(runs, { since, until }) {
-  const lines = runs
-    .filter((run) => {
-      const at = Date.parse(run.createdAt);
-      return at >= since && at < until;
-    })
-    .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
-    .map((run) => {
-      const kst = new Date(Date.parse(run.createdAt) + KST_OFFSET_MS).toISOString();
-      const when = `${kst.slice(5, 7)}/${kst.slice(8, 10)} ${kst.slice(11, 16)}`;
-      const result = RUN_RESULT_LABELS[run.conclusion] || RUN_RESULT_LABELS[run.status] || run.conclusion || run.status || '';
-      return `- ${when} ${result}: ${run.displayTitle}`;
-    });
-  return lines.length > 0 ? lines.join('\n') : '해당 기간 운영 배포 없음';
-}
-
-export function buildInsightPrompt({ report, previous, errors, deploys }) {
+export function buildInsightPrompt({ report, previous, errors }) {
   return [
     '너는 MODY 팀의 데이터 분석 보조다. 아래 일간 리포트를 읽고 팀이 알아야 할 인사이트를 Slack thread 댓글로 쓴다.',
     '',
@@ -142,7 +116,7 @@ export function buildInsightPrompt({ report, previous, errors, deploys }) {
     '- 평소와 다른 변화만 고른다. 리포트의 전일 대비와 이전 리포트들을 함께 본다.',
     `- 비교할 이전 리포트는 ${previous.length}개다. 3개 미만이면 비교가 제한적이라고 한 줄로 밝힌다.`,
     '- 1~2건 수준의 작은 변화에는 의미를 부여하지 않는다.',
-    '- 원인은 단정하지 않는다. 같은 기간의 에러·배포 기록과 시기가 겹칠 때만 가능성으로 적는다.',
+    '- 원인은 단정하지 않는다. 같은 날 에러 기록과 시기가 겹칠 때만 가능성으로 적는다.',
     '- 지표 정의가 필요하면 scripts/daily-report/daily_report.py를 읽는다. 코드·DB·서버는 수정하거나 조회하지 않는다.',
     '- 코드, SQL, 파일 경로, 서버 정보는 쓰지 않는다. 비개발자도 이해할 수 있게 쓴다.',
     '',
@@ -161,9 +135,6 @@ export function buildInsightPrompt({ report, previous, errors, deploys }) {
     '',
     `[${report.date} 서버 에러 알림]`,
     errors,
-    '',
-    `[${addDays(report.date, -1)} ~ ${report.date} 운영 배포]`,
-    deploys,
   ].join('\n');
 }
 
@@ -172,16 +143,12 @@ export function createDailyInsightRunner({
   botId,
   reportChannelId,
   errorChannelId,
-  githubRepo,
-  ghPath,
   parseServerError,
   isIgnoredNoise,
   alertEnvironment,
   analyze,
   post,
   format = (text) => text,
-  runGh = (args) => execFileAsync(ghPath, args, { timeout: 30_000 }),
-  deployWorkflow = 'deploy-prod.yml',
   lookback = 7,
 }) {
   async function loadErrors(date) {
@@ -203,36 +170,6 @@ export function createDailyInsightRunner({
     return summarizeErrorAlerts(messages, { parseServerError, isIgnoredNoise, alertEnvironment });
   }
 
-  // 머지 커밋 제목('Merge pull request #n …') 대신 PR 제목을 쓴다.
-  async function withPullRequestTitle(run) {
-    const number = run.displayTitle?.match(/^Merge pull request #(\d+)/)?.[1];
-    if (!number) return run;
-    try {
-      const { stdout } = await runGh(['pr', 'view', number, '--repo', githubRepo, '--json', 'title', '-q', '.title']);
-      return { ...run, displayTitle: `#${number} ${stdout.trim()}` };
-    } catch {
-      return run;
-    }
-  }
-
-  async function loadDeploys(date) {
-    const window = { since: kstDayRange(addDays(date, -1)).start * 1000, until: kstDayRange(date).end * 1000 };
-    try {
-      const { stdout } = await runGh([
-        'run', 'list', '--repo', githubRepo, '--workflow', deployWorkflow, '--limit', '30',
-        '--json', 'createdAt,conclusion,status,displayTitle',
-      ]);
-      const runs = JSON.parse(stdout).filter((run) => {
-        const at = Date.parse(run.createdAt);
-        return at >= window.since && at < window.until;
-      });
-      return summarizeDeploys(await Promise.all(runs.map(withPullRequestTitle)), window);
-    } catch (error) {
-      console.error('[daily-insight] failed to read deploy runs:', error?.stderr ?? error?.message ?? error);
-      return '배포 기록을 가져오지 못함';
-    }
-  }
-
   return async function runFor(date, { dryRun = false } = {}) {
     const history = await client.conversations.history({ channel: reportChannelId, limit: 100 });
     const reports = pickReports(history.messages ?? []);
@@ -248,8 +185,8 @@ export function createDailyInsightRunner({
     }
 
     const previous = reports.filter((item) => item.date < date).slice(0, lookback);
-    const [errors, deploys] = await Promise.all([loadErrors(date), loadDeploys(date)]);
-    const prompt = buildInsightPrompt({ report, previous, errors, deploys });
+    const errors = await loadErrors(date);
+    const prompt = buildInsightPrompt({ report, previous, errors });
     const analysis = await analyze(prompt);
     if (!analysis) throw new Error('insight_analysis_failed');
 

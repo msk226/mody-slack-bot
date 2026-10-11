@@ -8,7 +8,6 @@ import {
   flattenReportBlocks,
   kstDayRange,
   pickReports,
-  summarizeDeploys,
   summarizeErrorAlerts,
 } from '../src/daily-insight.js';
 
@@ -105,21 +104,6 @@ test('summarizes error alerts by environment and request', () => {
   assert.equal(summarizeErrorAlerts([], deps), '에러 알림 없음');
 });
 
-test('lists deploys inside the window in KST with result labels', () => {
-  const window = { since: Date.parse('2026-10-09T00:00:00+09:00'), until: Date.parse('2026-10-11T00:00:00+09:00') };
-  assert.equal(summarizeDeploys([
-    { createdAt: '2026-10-10T04:10:57Z', conclusion: 'success', status: 'completed', displayTitle: '#217 모니터링 터널' },
-    { createdAt: '2026-10-08T01:00:00Z', conclusion: 'success', status: 'completed', displayTitle: 'old' },
-    { createdAt: '2026-10-10T03:48:46Z', conclusion: 'failure', status: 'completed', displayTitle: '#216 모니터링' },
-    { createdAt: '2026-10-10T14:59:00Z', conclusion: '', status: 'in_progress', displayTitle: 'manual' },
-  ], window), [
-    '- 10/10 12:48 실패: #216 모니터링',
-    '- 10/10 13:10 성공: #217 모니터링 터널',
-    '- 10/10 23:59 진행 중: manual',
-  ].join('\n'));
-  assert.equal(summarizeDeploys([], window), '해당 기간 운영 배포 없음');
-});
-
 function fakeClient({ reports = [], replies = [] } = {}) {
   const calls = { replies: 0 };
   return {
@@ -140,18 +124,11 @@ function runnerDeps(client, overrides = {}) {
     botId: 'BBOT',
     reportChannelId: 'CREPORT',
     errorChannelId: 'CERR',
-    githubRepo: 'org/repo',
-    ghPath: 'gh',
     parseServerError: () => null,
     isIgnoredNoise: () => false,
     alertEnvironment: () => null,
     analyze: async () => '- 특이사항 없음',
     post: async () => {},
-    runGh: async (args) => ({
-      stdout: args[0] === 'run'
-        ? JSON.stringify([{ createdAt: '2026-10-10T04:10:57Z', conclusion: 'success', status: 'completed', displayTitle: 'Merge pull request #217 from org/feature' }])
-        : 'PR 제목\n',
-    }),
     ...overrides,
   };
 }
@@ -174,7 +151,7 @@ test('does not post twice when the thread already has an insight', async () => {
   assert.equal(analyzed, false);
 });
 
-test('posts the insight in the report thread with report, errors, and deploys in the prompt', async () => {
+test('posts the insight in the report thread with the report and errors in the prompt', async () => {
   let prompt = '';
   const posts = [];
   const client = fakeClient({ reports: [report], replies: [report] });
@@ -188,7 +165,7 @@ test('posts the insight in the report thread with report, errors, and deploys in
   assert.match(prompt, /\[2026-10-10 리포트\]/);
   assert.match(prompt, /▲ \+2/);
   assert.match(prompt, /에러 알림 없음/);
-  assert.match(prompt, /성공: #217 PR 제목/);
+  assert.doesNotMatch(prompt, /배포/);
   assert.deepEqual(posts, [['CREPORT', '300.0', `*${INSIGHT_TITLE}*\n- 회원 증가`]]);
 });
 
