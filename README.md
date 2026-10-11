@@ -36,7 +36,7 @@ Slack (Socket Mode + 에러 채널 60초 보조 폴링)
 | 재시작 | `run-forever.sh`가 봇이 종료되면 5초 뒤 다시 띄웁니다. 이때 `.env`를 다시 읽습니다. |
 | 잠자기 방지 | launchd `com.mody.keepawake`(`caffeinate -imsu`)가 Mac이 잠들지 않게 합니다. |
 | 자동 시작 | launchd `com.mody.slack-error-harness`는 등록돼 있지만 비활성화 상태입니다. 재부팅 후에는 직접 시작해야 합니다. |
-| AI | Codex CLI(`codex exec`)를 씁니다. ChatGPT 계정으로 로그인하고, 기본 모델은 `gpt-5.6-luna`입니다. |
+| AI | Codex CLI(`codex exec`)를 씁니다. ChatGPT 계정으로 로그인하고, 기본 모델은 `gpt-6-luna`입니다. |
 | GitHub | `gh` CLI로 이슈를 만들고 워크플로를 실행합니다. |
 | MODY 코드 | Codex는 `~/Desktop/Code/mody-server`에서 작업합니다. |
 | 서버 접근 | SSH 별칭 `mody-dev`·`mody-prod`와 Codex 스킬 `mody-operations`(조회)·`mody-dev-operations`(dev 변경)를 씁니다. |
@@ -88,7 +88,7 @@ Slack에서 `@Mody Signal 상태 알려줘`로 실행 중인 작업과 대기 �
 | `DAILY_REPORT_TRIGGER_ENABLED` | 일일 리포트 실행 (`true`) |
 | `DAILY_REPORT_TIME` | 일일 리포트 시각, KST (`09:00`) |
 | `USE_CODEX_ANALYSIS` | 에러 분석에 Codex 사용. `false`면 키워드 코드 검색만 합니다 (`true`) |
-| `CODEX_ANALYSIS_MODEL` | Codex 모델 (`gpt-5.6-luna`) |
+| `CODEX_ANALYSIS_MODEL` | Codex 모델 (`gpt-6-luna`) |
 | `CODEX_REASONING_EFFORT` | Codex 추론 강도 (`medium`) |
 | `CODEX_ANALYSIS_TIMEOUT_MS` | 에러 분석·요약 제한 시간. 0은 무제한 (`0`) |
 | `AGENT_TIMEOUT_MS` | 멘션 작업 제한 시간 (`1200000`, 20분) |
@@ -97,7 +97,7 @@ Slack에서 `@Mody Signal 상태 알려줘`로 실행 중인 작업과 대기 �
 | `SLACK_WATCHDOG_MS` | 폴링이 이 시간 넘게 실패하면 프로세스를 재시작합니다 (`120000`) |
 | `PROCESS_EXISTING_MESSAGES` | 봇 시작 전 메시지도 처리 (`false`) |
 | `SLACK_BOT_USER_ID`, `SLACK_BOT_ID` | 비우면 시작할 때 Slack에서 조회합니다 |
-| `ENABLE_PRIVILEGED_OPERATIONS` | 현재 사용하는 코드가 없습니다. 값과 관계없이 멘션 작업은 전체 권한으로 실행됩니다 (`true`) |
+| `ENABLE_PRIVILEGED_OPERATIONS` | 현재 사용하는 코드가 없습니다. 멘션 작업은 의도적으로 값과 관계없이 전체 권한으로 실행됩니다 (`true`) |
 
 파일 위치는 `AGENT_PROMPT_PATH`, `AGENT_RESULT_SCHEMA_PATH`, `ERROR_ISSUE_CACHE_FILE`, `DAILY_REPORT_STATE_FILE`, `HANDLED_ALERT_DIRECTORY`, `AUDIT_DIRECTORY`로 바꿀 수 있습니다. 기본값은 `prompts/`, `config/`, `logs/` 아래입니다.
 
@@ -145,7 +145,7 @@ Slack에서 `@Mody Signal 상태 알려줘`로 실행 중인 작업과 대기 �
 ## 권한과 안전장치
 
 - 에러 분석과 thread 요약은 Codex 읽기 전용 샌드박스에서 실행합니다.
-- 그 외 멘션 작업은 Codex를 샌드박스와 승인 없이 전체 권한으로 실행합니다. 작업 범위는 `prompts/mody-agent.md`의 지침으로 제한하고, 코드로 강제하지는 않습니다. 봇을 멘션할 수 있는 모든 Slack 사용자가 요청할 수 있습니다.
+- 그 외 멘션 작업은 의도적으로 Codex를 샌드박스와 승인 없이 전체 권한으로 실행합니다. 작업 범위는 `prompts/mody-agent.md`의 지침으로 제한하고, 코드로 강제하지는 않습니다. 봇을 멘션할 수 있는 모든 Slack 사용자가 요청할 수 있습니다.
 - Codex에는 허용한 환경변수(`HOME`, `PATH`, `SSH_AUTH_SOCK` 등)만 넘깁니다. 이름에 `TOKEN`, `SECRET`, `PASSWORD`, `API_KEY` 같은 단어가 들어간 변수는 넘기지 않습니다.
 - 감사 기록(`logs/audit/operations.jsonl`)에는 확인 ID, 상태, 환경, 채널, 사용자, 소요 시간만 남깁니다. 요청 본문과 비밀값은 남기지 않습니다.
 

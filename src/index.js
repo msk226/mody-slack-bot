@@ -45,7 +45,7 @@ const config = {
   dailyReportTime: process.env.DAILY_REPORT_TIME ?? '09:00',
   dailyReportStateFile: process.env.DAILY_REPORT_STATE_FILE ?? path.join(process.cwd(), 'logs', 'daily-report-trigger.json'),
   useCodexAnalysis: process.env.USE_CODEX_ANALYSIS !== 'false',
-  codexAnalysisModel: process.env.CODEX_ANALYSIS_MODEL ?? 'gpt-5.6-luna',
+  codexAnalysisModel: process.env.CODEX_ANALYSIS_MODEL ?? 'gpt-6-luna',
   codexReasoningEffort: process.env.CODEX_REASONING_EFFORT ?? 'medium',
   codexAnalysisTimeoutMs: Number(process.env.CODEX_ANALYSIS_TIMEOUT_MS ?? 0),
   processExistingMessages: process.env.PROCESS_EXISTING_MESSAGES === 'true',
