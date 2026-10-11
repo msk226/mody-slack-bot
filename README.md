@@ -11,6 +11,7 @@ MODY 팀 Slack에서 동작하는 운영 봇입니다. 김민석의 Mac에서 �
 | thread 요약 | thread 대화를 요약합니다. |
 | 봇 상태 | 실행 상태와 작업 큐를 바로 답합니다. |
 | 일일 리포트 | 매일 09:00(KST)에 MODY 저장소의 `daily-report.yml` 워크플로를 실행합니다. |
+| 리포트 인사이트 | #10_daily_report에 리포트가 올라오면 이전 리포트, 같은 날 500 에러, 운영 배포 기록과 함께 읽고 리포트 thread에 인사이트를 남깁니다. |
 
 ## 동작 구조
 
@@ -26,6 +27,8 @@ Slack (Socket Mode + 에러 채널 60초 보조 폴링)
       → 결과 JSON 검증 → thread 답변, 감사 기록
 
 매일 09:00 KST → gh workflow run daily-report.yml
+매일 09:00 KST 이후 5분마다 → #10_daily_report에서 어제 날짜 리포트 확인
+    → 이전 리포트·500 에러·운영 배포 기록 수집 → Codex 읽기 전용 분석 → 리포트 thread에 인사이트
 ```
 
 ## 실행 환경
@@ -86,7 +89,9 @@ Slack에서 `@Mody Signal 상태 알려줘`로 실행 중인 작업과 대기 �
 | `GITHUB_ISSUE_LABELS` | 이슈 라벨, 쉼표로 구분 (`bug`) |
 | `GH_PATH` | gh 실행 파일 경로 (`/opt/homebrew/bin/gh`) |
 | `DAILY_REPORT_TRIGGER_ENABLED` | 일일 리포트 실행 (`true`) |
-| `DAILY_REPORT_TIME` | 일일 리포트 시각, KST (`09:00`) |
+| `DAILY_REPORT_TIME` | 일일 리포트 시각, KST (`09:00`). 인사이트도 이 시각부터 확인합니다 |
+| `DAILY_INSIGHT_ENABLED` | 리포트 인사이트 (`true`) |
+| `DAILY_REPORT_CHANNEL_ID` | 일일 리포트 채널 ID (`C0C82K2MKRT`, #10_daily_report) |
 | `USE_CODEX_ANALYSIS` | 에러 분석에 Codex 사용. `false`면 키워드 코드 검색만 합니다 (`true`) |
 | `CODEX_ANALYSIS_MODEL` | Codex 모델 (`gpt-6-luna`) |
 | `CODEX_REASONING_EFFORT` | Codex 추론 강도 (`medium`) |
@@ -99,7 +104,7 @@ Slack에서 `@Mody Signal 상태 알려줘`로 실행 중인 작업과 대기 �
 | `SLACK_BOT_USER_ID`, `SLACK_BOT_ID` | 비우면 시작할 때 Slack에서 조회합니다 |
 | `ENABLE_PRIVILEGED_OPERATIONS` | 현재 사용하는 코드가 없습니다. 멘션 작업은 의도적으로 값과 관계없이 전체 권한으로 실행됩니다 (`true`) |
 
-파일 위치는 `AGENT_PROMPT_PATH`, `AGENT_RESULT_SCHEMA_PATH`, `ERROR_ISSUE_CACHE_FILE`, `DAILY_REPORT_STATE_FILE`, `HANDLED_ALERT_DIRECTORY`, `AUDIT_DIRECTORY`로 바꿀 수 있습니다. 기본값은 `prompts/`, `config/`, `logs/` 아래입니다.
+파일 위치는 `AGENT_PROMPT_PATH`, `AGENT_RESULT_SCHEMA_PATH`, `ERROR_ISSUE_CACHE_FILE`, `DAILY_REPORT_STATE_FILE`, `DAILY_INSIGHT_STATE_FILE`, `HANDLED_ALERT_DIRECTORY`, `AUDIT_DIRECTORY`로 바꿀 수 있습니다. 기본값은 `prompts/`, `config/`, `logs/` 아래입니다.
 
 ## Slack 사용법
 
@@ -109,6 +114,18 @@ Slack에서 `@Mody Signal 상태 알려줘`로 실행 중인 작업과 대기 �
 - 같은 에러(메서드·경로·예외·첫 스택 프레임)는 30분 안에 한 번만 분석합니다.
 - `/.env`, `/wp-admin` 같은 스캐너 요청과 `MultipartException`은 무시합니다.
 - 같은 에러로 열린 GitHub 이슈가 있으면 새로 만들지 않고 링크만 답니다.
+
+### 일간 리포트 인사이트
+
+- 09:00(KST)부터 5분마다 #10_daily_report에 어제 날짜 리포트(`MODY 일일 리포트 YYYY-MM-DD`)가 올라왔는지 확인합니다.
+- 리포트가 있으면 아래 자료를 함께 Codex에 넘기고, 리포트 thread에 `데일리 인사이트` 댓글을 남깁니다.
+  - 최근 리포트 최대 7개
+  - 리포트 날짜의 500 에러 알림 집계
+  - 그 전날부터 리포트 날짜까지의 운영 배포 기록(`deploy-prod.yml` 실행, PR 제목)
+- 댓글은 눈에 띄는 변화, 원인 후보(가능성), 확인해 볼 것으로 600자 안에서 씁니다. 특이사항이 없으면 한 줄만 남깁니다.
+- 날짜마다 한 번만 남깁니다. thread에 이미 인사이트가 있으면 다시 쓰지 않습니다.
+- 분석이 실패하면 30분 뒤 다시 시도하고, 같은 날짜는 3번까지만 시도합니다.
+- 리포트는 봇 토큰으로 올라와서 봇이 자기 메시지로 보고 이벤트로 받지 않습니다. 그래서 채널 기록을 직접 확인합니다.
 
 ### 멘션 요청
 
@@ -146,7 +163,7 @@ Slack에서 `@Mody Signal 상태 알려줘`로 실행 중인 작업과 대기 �
 
 ## 권한과 안전장치
 
-- 에러 분석과 thread 요약은 Codex 읽기 전용 샌드박스에서 실행합니다.
+- 에러 분석, thread 요약, 리포트 인사이트는 Codex 읽기 전용 샌드박스에서 실행합니다.
 - 그 외 멘션 작업은 의도적으로 Codex를 샌드박스와 승인 없이 전체 권한으로 실행합니다. 작업 범위는 `prompts/mody-agent.md`의 지침으로 제한하고, 코드로 강제하지는 않습니다. 봇을 멘션할 수 있는 모든 Slack 사용자가 요청할 수 있습니다.
 - Codex에는 허용한 환경변수(`HOME`, `PATH`, `SSH_AUTH_SOCK` 등)만 넘깁니다. 이름에 `TOKEN`, `SECRET`, `PASSWORD`, `API_KEY` 같은 단어가 들어간 변수는 넘기지 않습니다.
 - 감사 기록(`logs/audit/operations.jsonl`)에는 확인 ID, 상태, 환경, 채널, 사용자, 소요 시간만 남깁니다. 요청 본문과 비밀값은 남기지 않습니다.
@@ -162,6 +179,7 @@ Slack에서 `@Mody Signal 상태 알려줘`로 실행 중인 작업과 대기 �
 | `handled-alerts/` | 처리한 에러 알림 표시 (중복 처리 방지) |
 | `error-issues.json` | 에러별 GitHub 이슈 캐시 |
 | `daily-report-trigger.json` | 일일 리포트 마지막 실행일 |
+| `daily-insight.json` | 리포트 인사이트를 마지막으로 남긴 리포트 날짜 |
 | `slack-error-harness.pid`, `slack-error-harness.lock/` | 감시 스크립트 PID와 중복 실행 방지 |
 
 ## 파일 구조
@@ -175,6 +193,7 @@ src/
   slack-status.js          상태 리액션, 알림 환경 판별
   github-issue.js          에러별 GitHub 이슈 생성·재사용
   daily-report-trigger.js  일일 리포트 워크플로 실행
+  daily-insight.js         일일 리포트 인사이트 수집·분석·게시
   audit-log.js             감사 기록
 prompts/mody-agent.md      멘션 작업 에이전트 지침
 config/agent-result.schema.json  에이전트 결과 JSON 스키마

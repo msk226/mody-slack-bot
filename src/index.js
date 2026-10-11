@@ -11,6 +11,7 @@ import { JobQueue } from './job-queue.js';
 import { alertEnvironment, markAlertEnvironment, setStatusReaction, slackMessage, stripStatusEmoji } from './slack-status.js';
 import { ensureErrorIssue } from './github-issue.js';
 import { startDailyReportTrigger } from './daily-report-trigger.js';
+import { createDailyInsightRunner, startDailyInsight } from './daily-insight.js';
 import {
   buildSafeChildEnvironment,
   findPreviousUserRequest,
@@ -47,6 +48,9 @@ const config = {
   dailyReportTriggerEnabled: process.env.DAILY_REPORT_TRIGGER_ENABLED !== 'false',
   dailyReportTime: process.env.DAILY_REPORT_TIME ?? '09:00',
   dailyReportStateFile: process.env.DAILY_REPORT_STATE_FILE ?? path.join(process.cwd(), 'logs', 'daily-report-trigger.json'),
+  dailyInsightEnabled: process.env.DAILY_INSIGHT_ENABLED !== 'false',
+  dailyReportChannelId: process.env.DAILY_REPORT_CHANNEL_ID ?? 'C0C82K2MKRT',
+  dailyInsightStateFile: process.env.DAILY_INSIGHT_STATE_FILE ?? path.join(process.cwd(), 'logs', 'daily-insight.json'),
   useCodexAnalysis: process.env.USE_CODEX_ANALYSIS !== 'false',
   codexAnalysisModel: process.env.CODEX_ANALYSIS_MODEL ?? 'gpt-6-luna',
   codexReasoningEffort: process.env.CODEX_REASONING_EFFORT ?? 'medium',
@@ -155,6 +159,26 @@ if (config.dailyReportTriggerEnabled) {
     workflow: 'daily-report.yml',
     time: config.dailyReportTime,
     stateFile: config.dailyReportStateFile,
+  });
+}
+if (config.dailyInsightEnabled) {
+  startDailyInsight({
+    time: config.dailyReportTime,
+    stateFile: config.dailyInsightStateFile,
+    runFor: createDailyInsightRunner({
+      client: app.client,
+      botId,
+      reportChannelId: config.dailyReportChannelId,
+      errorChannelId: config.errorChannelId,
+      githubRepo: config.githubRepo,
+      ghPath: config.ghPath,
+      parseServerError,
+      isIgnoredNoise,
+      alertEnvironment,
+      analyze: (prompt) => runCodexReadOnly(prompt, null),
+      post: (channel, threadTs, text) => upsertThreadReply(app.client, { channel, ts: threadTs }, text),
+      format: formatForSlack,
+    }),
   });
 }
 
