@@ -1,112 +1,200 @@
-# MODY Slack Operations Agent
+# MODY Slack 운영 봇
 
-로컬 Mac에서 Slack 멘션을 작업 단위로 받아 MODY 코드, dev/prod 데이터, 서비스 상태를 확인하고 검증된 결과를 thread에 답변하는 운영 에이전트입니다.
+MODY 팀 Slack에서 동작하는 운영 봇입니다. 김민석의 Mac에서 실행됩니다. 에러 채널에 올라온 500 에러를 자동으로 분석하고, 봇을 멘션한 요청을 Codex 에이전트로 처리합니다.
 
-## 구조
+## 하는 일
+
+| 기능 | 동작 |
+| --- | --- |
+| 500 에러 분석 | 에러 채널 알림을 읽고 MODY 코드를 읽기 전용으로 분석해 thread에 원인 후보를 답합니다. 같은 에러의 GitHub 이슈를 만들거나, 열린 이슈가 있으면 연결합니다. |
+| 멘션 작업 | 코드 확인, dev/prod 데이터 조회, dev 데이터 보정, 코드 수정·PR·배포 요청을 처리합니다. |
+| thread 요약 | thread 대화를 요약합니다. |
+| 봇 상태 | 실행 상태와 작업 큐를 바로 답합니다. |
+| 일일 리포트 | 매일 09:00(KST)에 MODY 저장소의 `daily-report.yml` 워크플로를 실행합니다. |
+
+## 동작 구조
 
 ```text
-Slack Socket Mode
-  → 요청 접수·중복 방지
-  → 영속 가능한 요청 ID·감사 기록
-  → 동시성 제한 작업 큐
-  → MODY 전용 Codex 에이전트
-      → 요청 분해
-      → 코드 / dev / prod / 작업 수행
-      → 교차 검증
-  → JSON Schema 결과 검증
-  → Slack 결과 렌더링
+Slack (Socket Mode + 에러 채널 60초 보조 폴링)
+├─ 에러 채널 500 알림
+│   → 파싱 → 스캐너 요청 제외 → 중복 확인
+│   → Codex 읽기 전용 분석 → thread 답변 → GitHub 이슈 생성·연결
+└─ 봇 멘션
+    → 민감 정보·개인 파일 요청 거절
+    → 요약·상태·버전 질문은 바로 처리
+    → 그 외: 작업 큐(동시 1건) → Codex 전체 권한 실행
+      → 결과 JSON 검증 → thread 답변, 감사 기록
+
+매일 09:00 KST → gh workflow run daily-report.yml
 ```
 
-단일 Mac 프로세스 규모에서는 외부 MQ, n8n, 벡터 DB를 사용하지 않는다. 작업 큐, 실행 계약, 감사 로그는 독립 모듈이므로 요청량이 늘면 외부 인프라로 교체할 수 있다.
+## 실행 환경
 
-## 실행
+| 항목 | 내용 |
+| --- | --- |
+| 실행 | `screen` 세션 `mody-slack-bot`에서 `scripts/run-forever.sh`를 실행합니다. |
+| 재시작 | `run-forever.sh`가 봇이 종료되면 5초 뒤 다시 띄웁니다. 이때 `.env`를 다시 읽습니다. |
+| 잠자기 방지 | launchd `com.mody.keepawake`(`caffeinate -imsu`)가 Mac이 잠들지 않게 합니다. |
+| 자동 시작 | launchd `com.mody.slack-error-harness`는 등록돼 있지만 비활성화 상태입니다. 재부팅 후에는 직접 시작해야 합니다. |
+| AI | Codex CLI(`codex exec`)를 씁니다. ChatGPT 계정으로 로그인하고, 기본 모델은 `gpt-5.6-luna`입니다. |
+| GitHub | `gh` CLI로 이슈를 만들고 워크플로를 실행합니다. |
+| MODY 코드 | Codex는 `~/Desktop/Code/mody-server`에서 작업합니다. |
+| 서버 접근 | SSH 별칭 `mody-dev`·`mody-prod`와 Codex 스킬 `mody-operations`(조회)·`mody-dev-operations`(dev 변경)를 씁니다. |
+| Node.js | 현재 v25.5.0에서 실행 중입니다. |
 
-`.env` 파일은 이 디렉토리에 로컬로만 둡니다.
+## 운영 명령
+
+모든 명령은 이 폴더(`~/Desktop/Code/mody-slack-bot`)에서 실행합니다.
 
 ```bash
-npm install
-npm start
+# 시작 (재부팅 후 등)
+screen -dmS mody-slack-bot /bin/zsh -lc 'cd ~/Desktop/Code/mody-slack-bot && exec bash scripts/run-forever.sh'
+
+# 실행 확인
+screen -ls
+tail -f logs/slack-error-harness.log
+
+# 코드나 .env 변경 반영: 봇 프로세스만 끄면 감시 스크립트가 5초 뒤 새로 띄웁니다
+pkill -P "$(pgrep -P "$(cat logs/slack-error-harness.pid)")" -f "node src/index.js"
+
+# 완전히 중지
+screen -S mody-slack-bot -X quit
 ```
 
-필수 환경변수:
+Slack에서 `@Mody Signal 상태 알려줘`로 실행 중인 작업과 대기 작업 수를 볼 수 있습니다.
 
-```bash
-SLACK_APP_TOKEN=xapp-...
-SLACK_BOT_TOKEN=xoxb-...
-SLACK_ERROR_CHANNEL_ID=C... 또는 G...
-GITHUB_REPO=Central-MakeUs/mody-server
-MODY_REPO_PATH=/Users/minseokkim/Desktop/Code/mody-server
-```
+## 설정 (`.env`)
 
-선택 환경변수:
+`.env`는 이 폴더에만 두고 커밋하지 않습니다.
 
-```bash
-AUTO_ANALYZE_ERRORS=true
-USE_CODEX_ANALYSIS=true
-CODEX_REASONING_EFFORT=high
-# 0이면 timeout 없이 품질 우선으로 기다립니다.
-CODEX_ANALYSIS_TIMEOUT_MS=0
-# 비우면 gpt-5.6-luna를 사용합니다.
-ENABLE_PRIVILEGED_OPERATIONS=true
-AGENT_CONCURRENCY=1
-AGENT_TIMEOUT_MS=1200000
-PROCESS_EXISTING_MESSAGES=false
-# Socket Mode 보조 폴링 간격입니다. 기본값은 60초이며, 0이면 비활성화합니다.
-SLACK_POLL_INTERVAL_MS=60000
-# Slack API polling that stays unavailable this long restarts the harness.
-SLACK_WATCHDOG_MS=120000
-```
+필수:
 
-## 사용법
+| 변수 | 설명 |
+| --- | --- |
+| `SLACK_BOT_TOKEN` | 봇 토큰 (`xoxb-`) |
+| `SLACK_APP_TOKEN` | Socket Mode 앱 토큰 (`xapp-`) |
+| `SLACK_ERROR_CHANNEL_ID` | 500 에러 알림이 올라오는 채널 ID |
 
-- 에러 채널에 500 에러 메시지가 올라오면 자동으로 원인 후보를 thread에 답변합니다.
-  - 답변은 `코드 수정 필요 가능성`, `데이터 보정 필요 가능성`, `운영 설정·외부 의존성 문제 가능성`을 근거와 함께 구분합니다.
-  - 실제 DB를 직접 수정하지 않으며, 데이터 보정이 의심되면 대상 조건과 읽기 전용 확인 방향만 제시합니다.
-- 봇을 멘션해서 코드 확인, dev/prod 데이터 조회, dev 보정, 코드 작업, PR, 배포 등을 요청할 수 있습니다.
-- 하나의 요청에서 코드와 DB 상태를 함께 확인할 수 있습니다.
-- 환경을 적지 않은 DB·서버 요청은 dev로 처리합니다. prod에 접근하려면 `운영`, `prod`, `prd` 중 하나를 명시합니다.
-- 같은 thread에서 후속 질문을 하면 이전 사용자·봇 답변을 함께 읽고 새 댓글로 답합니다. 기존 답변은 수정하지 않으며, 질문마다 봇 멘션이 필요합니다.
-- 결과는 `결론`, `확인 결과`, `판단`, `다음 조치`, `확인 ID`로 구성됩니다.
-- 오래 걸리는 요청은 30초마다 같은 진행 댓글의 조사 단계와 경과 시간을 갱신합니다.
+선택 (괄호 안은 기본값):
+
+| 변수 | 설명 |
+| --- | --- |
+| `MODY_REPO_PATH` | MODY 서버 코드 경로 (`/Users/minseokkim/Desktop/Code/mody-server`) |
+| `GITHUB_REPO` | 이슈·리포트 대상 저장소 (`Central-MakeUs/mody-server`) |
+| `AUTO_ANALYZE_ERRORS` | 500 에러 자동 분석 (`true`) |
+| `AUTO_CREATE_ISSUES` | 에러별 GitHub 이슈 생성 (`true`) |
+| `GITHUB_ISSUE_LABELS` | 이슈 라벨, 쉼표로 구분 (`bug`) |
+| `GH_PATH` | gh 실행 파일 경로 (`/opt/homebrew/bin/gh`) |
+| `DAILY_REPORT_TRIGGER_ENABLED` | 일일 리포트 실행 (`true`) |
+| `DAILY_REPORT_TIME` | 일일 리포트 시각, KST (`09:00`) |
+| `USE_CODEX_ANALYSIS` | 에러 분석에 Codex 사용. `false`면 키워드 코드 검색만 합니다 (`true`) |
+| `CODEX_ANALYSIS_MODEL` | Codex 모델 (`gpt-5.6-luna`) |
+| `CODEX_REASONING_EFFORT` | Codex 추론 강도 (`medium`) |
+| `CODEX_ANALYSIS_TIMEOUT_MS` | 에러 분석·요약 제한 시간. 0은 무제한 (`0`) |
+| `AGENT_TIMEOUT_MS` | 멘션 작업 제한 시간 (`1200000`, 20분) |
+| `AGENT_CONCURRENCY` | 동시에 처리할 멘션 작업 수 (`1`) |
+| `SLACK_POLL_INTERVAL_MS` | 에러 채널 보조 폴링 간격. 0은 끕니다 (`60000`) |
+| `SLACK_WATCHDOG_MS` | 폴링이 이 시간 넘게 실패하면 프로세스를 재시작합니다 (`120000`) |
+| `PROCESS_EXISTING_MESSAGES` | 봇 시작 전 메시지도 처리 (`false`) |
+| `SLACK_BOT_USER_ID`, `SLACK_BOT_ID` | 비우면 시작할 때 Slack에서 조회합니다 |
+| `ENABLE_PRIVILEGED_OPERATIONS` | 현재 사용하는 코드가 없습니다. 값과 관계없이 멘션 작업은 전체 권한으로 실행됩니다 (`true`) |
+
+파일 위치는 `AGENT_PROMPT_PATH`, `AGENT_RESULT_SCHEMA_PATH`, `ERROR_ISSUE_CACHE_FILE`, `DAILY_REPORT_STATE_FILE`, `HANDLED_ALERT_DIRECTORY`, `AUDIT_DIRECTORY`로 바꿀 수 있습니다. 기본값은 `prompts/`, `config/`, `logs/` 아래입니다.
+
+## Slack 사용법
+
+### 500 에러 자동 분석
+
+- 에러 채널에 서버 에러 알림이 올라오면 thread에 원인 후보를 답합니다. 대응은 `데이터 확인/보정`, `기능 수정`, `외부 서비스 확인`, `추가 확인 필요`로 나눕니다.
+- 같은 에러(메서드·경로·예외·첫 스택 프레임)는 30분 안에 한 번만 분석합니다.
+- `/.env`, `/wp-admin` 같은 스캐너 요청과 `MultipartException`은 무시합니다.
+- 같은 에러로 열린 GitHub 이슈가 있으면 새로 만들지 않고 링크만 답니다.
+
+### 멘션 요청
 
 ```text
 @Mody Signal 온보딩 프로필 validation 어디서 걸려?
-@Mody Signal AUTH401은 어디서 쓰여?
-@Mody Signal 이 thread 요약해줘
-@Mody Signal 운영에서 이 회원의 챌린지 달성 상태를 보고 코드 조건과도 대조해줘
-```
-
-```text
-@Mody Signal fix 이 에러 PR까지 올려줘
-```
-
-모든 사용자는 구체적인 작업 지시를 바로 요청할 수 있습니다.
-
-```text
-@Mody Signal 이 thread 참고해서 PR 열어줘
-@Mody Signal dev 테스트 그룹의 진행 중 챌린지 없는 데이터만 보정해줘
 @Mody Signal dev 그룹 목록과 주간 챌린지 개수 확인해줘
-@Mody Signal 5300022674432 memberId의 닉네임 조회해줘
-@Mody Signal 운영 5300022674432 memberId의 닉네임 조회해줘
+@Mody Signal 운영에서 이 회원의 챌린지 달성 여부를 코드 조건과 대조해줘
+@Mody Signal fix 이 에러 PR까지 올려줘
+@Mody Signal 이 thread 요약해줘
 ```
 
+- 환경을 적지 않은 데이터·서버 요청은 dev로 처리합니다. prod는 `운영`, `prod`, `prd` 중 하나를 적어야 접근합니다.
+- 같은 thread의 이전 대화를 읽고 이어서 답합니다. 질문할 때마다 봇을 멘션해야 합니다.
+- 멘션만 남기면 60초 안에 쓴 직전 메시지를 요청으로 씁니다. 그런 메시지가 없으면 10초 동안 이어지는 메시지를 기다립니다.
+- 오래 걸리는 작업은 30초마다 진행 댓글을 갱신합니다.
+- 요청 메시지에 리액션으로 상태를 표시합니다: `확인중` → `loading` → `완료` 또는 `alert-red`.
+- 결과는 `처리 결과`, `확인 결과`, `판단`, `다음 조치`, `참고`, `확인 ID` 순서로 답합니다.
 
-## 운영 기록
+### 요청 분기 순서
 
-- 각 요청은 `MODY-YYYYMMDD-...` 형식의 확인 ID를 가집니다.
-- 실행 상태, 환경, 소요 시간은 `logs/audit/operations.jsonl`에 기록됩니다.
-- Slack 요청 본문과 비밀값은 감사 로그에 저장하지 않습니다.
-- 실행 중인 작업과 대기 건수는 `상태 알려줘`로 확인할 수 있습니다.
+봇은 요청에 들어간 말로 처리 방식을 정하고, 위에서부터 먼저 맞는 규칙을 따릅니다.
 
-## 접근 제어
+| 요청에 들어간 말 | 처리 |
+| --- | --- |
+| `.env`·토큰·비밀값을 읽거나 보여 달라는 요청 | 거절 |
+| `Desktop`, `~/`, `.ssh` 같은 개인 파일·폴더 | 거절 |
+| `요약`, `정리`, `쓰레드`, `thread` | thread 요약 (읽기 전용) |
+| `상태`, `살아있`, `ping`, `health`, `작동해`, `켜져있` | 봇 상태 답변 |
+| `이전 버전과 달라진 점` 같은 질문 | 버전 차이 답변 |
+| 그 외 | 에이전트 작업 (전체 권한) |
 
-- MODY 저장소 밖의 개인 로컬 파일·폴더 요청은 실행 전에 차단합니다.
-- 봇을 멘션할 수 있는 모든 Slack 사용자가 dev·prod 조회, 데이터 변경, 코드 수정, GitHub 작업을 요청할 수 있습니다.
-- Codex 자식 프로세스에는 Slack 토큰, API 키, 비밀번호 환경변수를 전달하지 않습니다.
+> **주의:** 작업 요청이어도 위 단어가 들어가면 그 처리로 넘어갑니다. 예를 들어 "운영 서버 상태 확인해줘"에는 봇 상태 답변이 나가고, "이 thread 참고해서 PR 열어줘"에는 요약이 나갑니다. 작업을 요청할 때는 이 단어들을 피해서 적습니다.
 
-## 검증
+## 권한과 안전장치
+
+- 에러 분석과 thread 요약은 Codex 읽기 전용 샌드박스에서 실행합니다.
+- 그 외 멘션 작업은 Codex를 샌드박스와 승인 없이 전체 권한으로 실행합니다. 작업 범위는 `prompts/mody-agent.md`의 지침으로 제한하고, 코드로 강제하지는 않습니다. 봇을 멘션할 수 있는 모든 Slack 사용자가 요청할 수 있습니다.
+- Codex에는 허용한 환경변수(`HOME`, `PATH`, `SSH_AUTH_SOCK` 등)만 넘깁니다. 이름에 `TOKEN`, `SECRET`, `PASSWORD`, `API_KEY` 같은 단어가 들어간 변수는 넘기지 않습니다.
+- 감사 기록(`logs/audit/operations.jsonl`)에는 확인 ID, 상태, 환경, 채널, 사용자, 소요 시간만 남깁니다. 요청 본문과 비밀값은 남기지 않습니다.
+
+## 로그와 상태 파일
+
+`logs/`는 git에서 제외합니다.
+
+| 파일 | 내용 |
+| --- | --- |
+| `slack-error-harness.log` | 실행 로그 |
+| `audit/operations.jsonl` | 요청별 감사 기록 |
+| `handled-alerts/` | 처리한 에러 알림 표시 (중복 처리 방지) |
+| `error-issues.json` | 에러별 GitHub 이슈 캐시 |
+| `daily-report-trigger.json` | 일일 리포트 마지막 실행일 |
+| `slack-error-harness.pid`, `slack-error-harness.lock/` | 감시 스크립트 PID와 중복 실행 방지 |
+
+## 파일 구조
+
+```text
+src/
+  index.js                 Slack 이벤트 처리, 요청 분기, Codex 실행
+  agent-contract.js        환경 추론, 결과 JSON 파싱, Slack 답변 형식
+  request-policy.js        개인 파일 요청 판별, Codex에 넘길 환경변수 필터
+  job-queue.js             동시 실행 수를 제한하는 작업 큐
+  slack-status.js          상태 리액션, 알림 환경 판별
+  github-issue.js          에러별 GitHub 이슈 생성·재사용
+  daily-report-trigger.js  일일 리포트 워크플로 실행
+  audit-log.js             감사 기록
+prompts/mody-agent.md      멘션 작업 에이전트 지침
+config/agent-result.schema.json  에이전트 결과 JSON 스키마
+scripts/run-forever.sh     감시·재시작 스크립트
+test/                      단위 테스트
+```
+
+## 개발
 
 ```bash
-npm run check
-npm test
+npm install
+npm run check   # 문법 검사
+npm test        # 단위 테스트
 ```
+
+변경은 커밋으로 관리하고 `.bak` 사본을 만들지 않습니다. 에이전트 작업 규칙은 `AGENTS.md`에 있습니다.
+
+## 문제 해결
+
+| 증상 | 확인 |
+| --- | --- |
+| 봇이 답하지 않음 | `screen -ls`로 세션을 확인합니다. 없으면 시작 명령을 실행하고 `logs/slack-error-harness.log` 마지막 줄을 봅니다. |
+| 로그에 `ENOTFOUND slack.com` | 네트워크가 끊긴 경우입니다. 감시 스크립트가 자동으로 다시 띄웁니다. |
+| 로그에 `Codex ... failed` | `codex login status`로 ChatGPT 로그인을 확인합니다. Codex가 실패하면 에러 분석은 키워드 검색 결과로 대신 답합니다. |
+| GitHub 이슈·리포트가 안 됨 | `gh auth status`를 확인합니다. |
