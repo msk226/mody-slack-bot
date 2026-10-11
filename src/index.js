@@ -14,7 +14,10 @@ import { startDailyReportTrigger } from './daily-report-trigger.js';
 import {
   buildSafeChildEnvironment,
   findPreviousUserRequest,
+  isHealthQuestion,
   isHostFileRequest,
+  isThreadSummaryRequest,
+  isVersionQuestion,
   stripSlackMentions,
 } from './request-policy.js';
 
@@ -581,18 +584,6 @@ function isMemberNicknameLookupRequest(text) {
     || /(?:조회|확인|봐|보여|알려|찾).*(?:닉네임|이름)/i.test(text);
 
   return hasMemberId && asksForNickname;
-}
-
-function isThreadSummaryRequest(text) {
-  return /요약|정리|쓰레드|thread/i.test(text);
-}
-
-function isHealthQuestion(text) {
-  return /(살아.?있|살았|ping|상태|health|작동.?해|켜져.?있)/i.test(text);
-}
-
-function isVersionQuestion(text) {
-  return /(이전|예전|기존|before).*(버전|봇|달라|차이|변경)|(뭐|무엇|어떤).*(달라졌|변경됐|개선됐|고도화)/i.test(text);
 }
 
 function renderHealthReply() {
