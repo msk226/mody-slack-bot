@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "start": "node src/index.js",
-    "check": "node --check src/index.js && node --check src/job-queue.js && node --check src/agent-contract.js && node --check src/request-policy.js && node --check src/daily-insight.js",
+    "check": "node --check src/index.js && node --check src/job-queue.js && node --check src/agent-contract.js && node --check src/request-policy.js && node --check src/daily-insight.js && node --check src/deploy-notifier.js",
     "test": "node --test"
   },
   "dependencies": {

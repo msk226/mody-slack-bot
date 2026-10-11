@@ -12,6 +12,7 @@ MODY 팀 Slack에서 동작하는 운영 봇입니다. 김민석의 Mac에서 �
 | 봇 상태 | 실행 상태와 작업 큐를 바로 답합니다. |
 | 일일 리포트 | 매일 09:00(KST)에 MODY 저장소의 `daily-report.yml` 워크플로를 실행합니다. |
 | 리포트 인사이트 | #10_daily_report에 리포트가 올라오면 이전 리포트, 같은 날 500 에러, 운영 배포 기록과 함께 읽고 리포트 thread에 인사이트를 남깁니다. |
+| 운영 배포 기록 | mody-server 운영 배포가 끝나면 #11_server_deploy에 버전, 결과, 새로 들어간 PR을 올립니다. |
 
 ## 동작 구조
 
@@ -29,6 +30,7 @@ Slack (Socket Mode + 에러 채널 60초 보조 폴링)
 매일 09:00 KST → gh workflow run daily-report.yml
 매일 09:00 KST 이후 5분마다 → #10_daily_report에서 어제 날짜 리포트 확인
     → 이전 리포트·500 에러·운영 배포 기록 수집 → Codex 읽기 전용 분석 → 리포트 thread에 인사이트
+1분마다 → deploy-prod.yml 실행 기록 확인 → 끝난 배포를 #11_server_deploy에 게시
 ```
 
 ## 실행 환경
@@ -92,6 +94,8 @@ Slack에서 `@Mody Signal 상태 알려줘`로 실행 중인 작업과 대기 �
 | `DAILY_REPORT_TIME` | 일일 리포트 시각, KST (`09:00`). 인사이트도 이 시각부터 확인합니다 |
 | `DAILY_INSIGHT_ENABLED` | 리포트 인사이트 (`true`) |
 | `DAILY_REPORT_CHANNEL_ID` | 일일 리포트 채널 ID (`C0C82K2MKRT`, #10_daily_report) |
+| `DEPLOY_NOTIFY_ENABLED` | 운영 배포 기록 게시 (`true`) |
+| `DEPLOY_CHANNEL_ID` | 배포 기록 채널 ID (`C0C8C3SPGG2`, #11_server_deploy) |
 | `USE_CODEX_ANALYSIS` | 에러 분석에 Codex 사용. `false`면 키워드 코드 검색만 합니다 (`true`) |
 | `CODEX_ANALYSIS_MODEL` | Codex 모델 (`gpt-6-luna`) |
 | `CODEX_REASONING_EFFORT` | Codex 추론 강도 (`medium`) |
@@ -104,7 +108,7 @@ Slack에서 `@Mody Signal 상태 알려줘`로 실행 중인 작업과 대기 �
 | `SLACK_BOT_USER_ID`, `SLACK_BOT_ID` | 비우면 시작할 때 Slack에서 조회합니다 |
 | `ENABLE_PRIVILEGED_OPERATIONS` | 현재 사용하는 코드가 없습니다. 멘션 작업은 의도적으로 값과 관계없이 전체 권한으로 실행됩니다 (`true`) |
 
-파일 위치는 `AGENT_PROMPT_PATH`, `AGENT_RESULT_SCHEMA_PATH`, `ERROR_ISSUE_CACHE_FILE`, `DAILY_REPORT_STATE_FILE`, `DAILY_INSIGHT_STATE_FILE`, `HANDLED_ALERT_DIRECTORY`, `AUDIT_DIRECTORY`로 바꿀 수 있습니다. 기본값은 `prompts/`, `config/`, `logs/` 아래입니다.
+파일 위치는 `AGENT_PROMPT_PATH`, `AGENT_RESULT_SCHEMA_PATH`, `ERROR_ISSUE_CACHE_FILE`, `DAILY_REPORT_STATE_FILE`, `DAILY_INSIGHT_STATE_FILE`, `DEPLOY_STATE_FILE`, `HANDLED_ALERT_DIRECTORY`, `AUDIT_DIRECTORY`로 바꿀 수 있습니다. 기본값은 `prompts/`, `config/`, `logs/` 아래입니다.
 
 ## Slack 사용법
 
@@ -126,6 +130,25 @@ Slack에서 `@Mody Signal 상태 알려줘`로 실행 중인 작업과 대기 �
 - 날짜마다 한 번만 남깁니다. thread에 이미 인사이트가 있으면 다시 쓰지 않습니다.
 - 분석이 실패하면 30분 뒤 다시 시도하고, 같은 날짜는 3번까지만 시도합니다.
 - 리포트는 봇 토큰으로 올라와서 봇이 자기 메시지로 보고 이벤트로 받지 않습니다. 그래서 채널 기록을 직접 확인합니다.
+
+### 운영 배포 기록
+
+1분마다 mody-server의 `deploy-prod.yml` 실행 기록을 확인하고, 끝난 배포를 #11_server_deploy에 한 번씩 올립니다. dev 배포는 올리지 않습니다.
+
+```text
+🚀 운영 배포 완료 · v2026.10.11-2
+• #225 (PR 제목)
+• #226 (PR 제목)
+커밋 782ecc8 · 16:17 완료 · 소요 7분 55초 · 실행 기록
+```
+
+규칙:
+
+- **버전:** 성공한 운영 배포에만 `vYYYY.MM.DD-N`을 붙입니다. 날짜는 배포 시작 시각의 KST 날짜이고, N은 그날 몇 번째 성공 배포인지입니다. 실패·취소된 배포는 번호를 쓰지 않습니다.
+- **버전 계산:** GitHub 실행 기록만으로 계산하므로 상태 파일이 사라져도 같은 번호가 나옵니다. 저장소에 태그나 릴리스는 만들지 않습니다.
+- **변경 사항:** 직전 성공 운영 배포의 커밋부터 이번 커밋까지 머지된 PR을 번호와 제목으로 적습니다(최대 15개). PR이 없으면 커밋 제목을, 같은 커밋을 다시 배포하면 `변경 없음`을 적습니다.
+- **실패·취소:** 실패하면 실패한 job과 step 이름을 함께 적습니다. 취소도 대상 변경과 함께 올립니다.
+- **처음 켤 때:** 지난 기록은 올리지 않고 가장 최근 배포 하나만 올립니다.
 
 ### 멘션 요청
 
@@ -180,6 +203,7 @@ Slack에서 `@Mody Signal 상태 알려줘`로 실행 중인 작업과 대기 �
 | `error-issues.json` | 에러별 GitHub 이슈 캐시 |
 | `daily-report-trigger.json` | 일일 리포트 마지막 실행일 |
 | `daily-insight.json` | 리포트 인사이트를 마지막으로 남긴 리포트 날짜 |
+| `deploy-notifier.json` | #11_server_deploy에 올린 배포 실행 ID (최근 100개) |
 | `slack-error-harness.pid`, `slack-error-harness.lock/` | 감시 스크립트 PID와 중복 실행 방지 |
 
 ## 파일 구조
@@ -194,6 +218,7 @@ src/
   github-issue.js          에러별 GitHub 이슈 생성·재사용
   daily-report-trigger.js  일일 리포트 워크플로 실행
   daily-insight.js         일일 리포트 인사이트 수집·분석·게시
+  deploy-notifier.js       운영 배포 버전 계산·변경 사항 정리·게시
   audit-log.js             감사 기록
 prompts/mody-agent.md      멘션 작업 에이전트 지침
 config/agent-result.schema.json  에이전트 결과 JSON 스키마
