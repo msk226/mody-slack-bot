@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["status", "environment", "summary", "facts", "explanation", "actions", "warnings"],
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": ["completed", "needs_input", "failed"]
+    },
+    "environment": {
+      "type": "string",
+      "enum": ["dev", "prod", "mixed", "local", "none"]
+    },
+    "summary": { "type": "string" },
+    "facts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["label", "value"],
+        "properties": {
+          "label": { "type": "string" },
+          "value": { "type": "string" }
+        }
+      }
+    },
+    "explanation": { "type": "string" },
+    "actions": { "type": "array", "items": { "type": "string" } },
+    "warnings": { "type": "array", "items": { "type": "string" } }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "name": "slack-error-harness",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "check": "node --check src/index.js && node --check src/job-queue.js && node --check src/agent-contract.js && node --check src/request-policy.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@slack/bolt": "^4.6.0",
+    "dotenv": "^17.2.0"
+  }
+}
