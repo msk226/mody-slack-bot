@@ -1,5 +1,0 @@
-온보딩 프로필 API는 [OnboardingController.java](/Users/minseokkim/Desktop/Code/mody-server/src/main/java/cmc/mody/onboarding/presentation/OnboardingController.java:53)의 `POST /api/v1/onboarding/profile`에서 받습니다.  
-컨트롤러는 `@CurrentMember Long memberId`와 `ProfileSetupRequest`를 받아 `OnboardingService.setupProfile(memberId, request.toCommand())`로 위임합니다.  
-실제 처리는 [OnboardingService.java](/Users/minseokkim/Desktop/Code/mody-server/src/main/java/cmc/mody/onboarding/application/OnboardingService.java:22)의 `setupProfile`입니다.  
-여기서 회원 조회, 중복 완료 검증, `Member.completeProfile`, 최초 체중 기록 저장, 식사/운동 알림 초기 설정을 수행합니다.  
-코드는 수정하지 않았습니다.
