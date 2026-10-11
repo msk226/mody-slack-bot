@@ -12,7 +12,6 @@ import { alertEnvironment, markAlertEnvironment, setStatusReaction, slackMessage
 import { ensureErrorIssue } from './github-issue.js';
 import { startDailyReportTrigger } from './daily-report-trigger.js';
 import { createDailyInsightRunner, startDailyInsight } from './daily-insight.js';
-import { createDeployNotifier, startDeployNotifier } from './deploy-notifier.js';
 import {
   buildSafeChildEnvironment,
   findPreviousUserRequest,
@@ -52,9 +51,6 @@ const config = {
   dailyInsightEnabled: process.env.DAILY_INSIGHT_ENABLED !== 'false',
   dailyReportChannelId: process.env.DAILY_REPORT_CHANNEL_ID ?? 'C0C82K2MKRT',
   dailyInsightStateFile: process.env.DAILY_INSIGHT_STATE_FILE ?? path.join(process.cwd(), 'logs', 'daily-insight.json'),
-  deployNotifyEnabled: process.env.DEPLOY_NOTIFY_ENABLED !== 'false',
-  deployChannelId: process.env.DEPLOY_CHANNEL_ID ?? 'C0C8C3SPGG2',
-  deployStateFile: process.env.DEPLOY_STATE_FILE ?? path.join(process.cwd(), 'logs', 'deploy-notifier.json'),
   useCodexAnalysis: process.env.USE_CODEX_ANALYSIS !== 'false',
   codexAnalysisModel: process.env.CODEX_ANALYSIS_MODEL ?? 'gpt-6-luna',
   codexReasoningEffort: process.env.CODEX_REASONING_EFFORT ?? 'medium',
@@ -182,21 +178,6 @@ if (config.dailyInsightEnabled) {
       analyze: (prompt) => runCodexReadOnly(prompt, null),
       post: (channel, threadTs, text) => upsertThreadReply(app.client, { channel, ts: threadTs }, text),
       format: formatForSlack,
-    }),
-  });
-}
-if (config.deployNotifyEnabled) {
-  startDeployNotifier({
-    poll: createDeployNotifier({
-      repo: config.githubRepo,
-      runGh: (args) => execFileAsync(config.ghPath, args, { timeout: 30_000 }),
-      post: (text) => app.client.chat.postMessage({
-        channel: config.deployChannelId,
-        unfurl_links: false,
-        unfurl_media: false,
-        ...slackMessage(text),
-      }),
-      stateFile: config.deployStateFile,
     }),
   });
 }
