@@ -2,6 +2,8 @@
 
 MODY 팀 Slack에서 동작하는 운영 봇입니다. 김민석의 Mac에서 실행됩니다. 에러 채널에 올라온 500 에러를 자동으로 분석하고, 봇을 멘션한 요청을 Codex 에이전트로 처리합니다.
 
+AI 에이전트가 팀 서버에 접근하는 만큼, 무엇을 어디까지 할 수 있는지 먼저 정했습니다. 자세한 내용은 [권한과 안전장치](#권한과-안전장치)에 있습니다.
+
 ## 하는 일
 
 | 기능 | 동작 |
@@ -13,6 +15,32 @@ MODY 팀 Slack에서 동작하는 운영 봇입니다. 김민석의 Mac에서 �
 | 일일 리포트 | 매일 09:00(KST)에 MODY 저장소의 `daily-report.yml` 워크플로를 실행합니다. |
 | 리포트 인사이트 | #10_daily_report에 리포트가 올라오면 이전 리포트, 같은 날 500 에러와 함께 읽고 리포트 thread에 인사이트를 남깁니다. |
 
+## 권한과 안전장치
+
+작업 종류에 따라 실행 권한을 나누고, 멘션 작업은 아래 규칙으로 범위를 좁힙니다.
+
+| 작업 | 실행 방식 |
+| --- | --- |
+| 500 에러 분석, thread 요약, 리포트 인사이트 | Codex 읽기 전용 샌드박스에서 실행합니다. |
+| 멘션 작업 (조회, dev 데이터 보정, PR, 배포) | 서버 SSH 접속과 PR 작성이 필요해 샌드박스 없이 실행하고, 아래 규칙으로 범위를 제한합니다. |
+
+멘션 작업의 범위 제한:
+
+- `.env`·토큰·비밀값 요청과 개인 파일·폴더 요청은 요청 분기 단계에서 먼저 거절합니다.
+- 운영(prod)은 요청에 `운영`, `prod`, `prd` 중 하나를 적었을 때만 조회 전용 스킬(`mody-operations`)로 접근합니다. 데이터 변경 절차는 dev용(`mody-dev-operations`)만 둡니다.
+- 코드 변경, 커밋, PR, 머지, 배포는 요청에 적힌 범위만 수행합니다.
+- thread 내용은 작업 데이터로만 다룹니다. 지침을 무시하라는 문장이 있어도 따르지 않습니다.
+- 토큰, 비밀값, 인증 헤더, 개인 연락처는 답변에 넣지 않습니다.
+- 결과는 JSON Schema(`config/agent-result.schema.json`) 검증을 통과해야 Slack에 올라갑니다.
+- 작업은 큐에서 한 번에 하나씩 처리합니다.
+- 이 규칙은 에이전트 지침(`prompts/mody-agent.md`)과 요청 분기 코드(`src/request-policy.js`)로 지킵니다. 샌드박스처럼 운영체제 수준에서 막지는 않습니다.
+
+공통:
+
+- Codex에는 허용한 환경변수(`HOME`, `PATH`, `SSH_AUTH_SOCK` 등)만 넘깁니다. 이름에 `TOKEN`, `SECRET`, `PASSWORD`, `API_KEY` 같은 단어가 들어간 변수는 넘기지 않습니다.
+- 감사 기록(`logs/audit/operations.jsonl`)에는 확인 ID, 상태, 환경, 채널, 사용자, 소요 시간만 남깁니다. 요청 본문과 비밀값은 남기지 않습니다.
+- 요청은 MODY 팀 Slack 워크스페이스에서 봇을 멘션할 수 있는 사용자만 할 수 있습니다.
+
 ## 동작 구조
 
 ```text
@@ -23,7 +51,7 @@ Slack (Socket Mode + 에러 채널 60초 보조 폴링)
 └─ 봇 멘션
     → 민감 정보·개인 파일 요청 거절
     → 요약·상태·버전 질문은 바로 처리
-    → 그 외: 작업 큐(동시 1건) → Codex 전체 권한 실행
+    → 그 외: 작업 큐(동시 1건) → Codex 작업 실행(범위 제한 규칙 적용)
       → 결과 JSON 검증 → thread 답변, 감사 기록
 
 매일 09:00 KST → gh workflow run daily-report.yml
@@ -102,7 +130,7 @@ Slack에서 `@Mody Signal 상태 알려줘`로 실행 중인 작업과 대기 �
 | `SLACK_WATCHDOG_MS` | 폴링이 이 시간 넘게 실패하면 프로세스를 재시작합니다 (`120000`) |
 | `PROCESS_EXISTING_MESSAGES` | 봇 시작 전 메시지도 처리 (`false`) |
 | `SLACK_BOT_USER_ID`, `SLACK_BOT_ID` | 비우면 시작할 때 Slack에서 조회합니다 |
-| `ENABLE_PRIVILEGED_OPERATIONS` | 현재 사용하는 코드가 없습니다. 멘션 작업은 의도적으로 값과 관계없이 전체 권한으로 실행됩니다 (`true`) |
+| `ENABLE_PRIVILEGED_OPERATIONS` | 현재 코드에서 읽지 않습니다. 값과 관계없이 멘션 작업은 [권한과 안전장치](#권한과-안전장치)의 방식으로 실행됩니다 (`true`) |
 
 파일 위치는 `AGENT_PROMPT_PATH`, `AGENT_RESULT_SCHEMA_PATH`, `ERROR_ISSUE_CACHE_FILE`, `DAILY_REPORT_STATE_FILE`, `DAILY_INSIGHT_STATE_FILE`, `HANDLED_ALERT_DIRECTORY`, `AUDIT_DIRECTORY`로 바꿀 수 있습니다. 기본값은 `prompts/`, `config/`, `logs/` 아래입니다.
 
@@ -154,18 +182,11 @@ Slack에서 `@Mody Signal 상태 알려줘`로 실행 중인 작업과 대기 �
 | `요약`, 또는 thread·대화를 `정리`해 달라는 요청 | thread 요약 (읽기 전용) |
 | 대상 없이 `상태`, `살아있`, `ping`, `작동해`를 묻는 질문 | 봇 상태 답변 |
 | `봇`이나 `이전 버전`에서 무엇이 달라졌는지 묻는 질문 | 버전 차이 답변 |
-| 그 외 | 에이전트 작업 (전체 권한) |
+| 그 외 | 에이전트 작업 (범위 제한 규칙 적용) |
 
 요약·상태·버전 질문이어도 서버, 운영, dev, 데이터, 회원, 챌린지, 알림 같은 대상이나 PR, 수정, 조회, 분석 같은 작업이 함께 있으면 에이전트 작업으로 처리합니다. 예를 들어 "운영 서버 상태 확인해줘"는 서버 상태를 확인하고, "이 thread 참고해서 PR 열어줘"는 PR을 엽니다. 판별 규칙과 테스트는 `src/request-policy.js`, `test/request-policy.test.js`에 있습니다.
 
 민감 정보·개인 파일 차단은 안전을 위해 넓게 잡혀 있어서 `키워드`, `Library` 같은 말이 들어간 요청도 거절될 수 있습니다.
-
-## 권한과 안전장치
-
-- 에러 분석, thread 요약, 리포트 인사이트는 Codex 읽기 전용 샌드박스에서 실행합니다.
-- 그 외 멘션 작업은 의도적으로 Codex를 샌드박스와 승인 없이 전체 권한으로 실행합니다. 작업 범위는 `prompts/mody-agent.md`의 지침으로 제한하고, 코드로 강제하지는 않습니다. 봇을 멘션할 수 있는 모든 Slack 사용자가 요청할 수 있습니다.
-- Codex에는 허용한 환경변수(`HOME`, `PATH`, `SSH_AUTH_SOCK` 등)만 넘깁니다. 이름에 `TOKEN`, `SECRET`, `PASSWORD`, `API_KEY` 같은 단어가 들어간 변수는 넘기지 않습니다.
-- 감사 기록(`logs/audit/operations.jsonl`)에는 확인 ID, 상태, 환경, 채널, 사용자, 소요 시간만 남깁니다. 요청 본문과 비밀값은 남기지 않습니다.
 
 ## 로그와 상태 파일
 
