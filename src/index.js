@@ -1,11 +1,12 @@
 import 'dotenv/config';
 import { App } from '@slack/bolt';
 import { execFile } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import { promisify } from 'node:util';
 import path from 'node:path';
 import { AuditLog } from './audit-log.js';
+import { buildAgyArgs, parseAgyOutput } from './agent-cli.js';
 import { inferEnvironment, parseAgentResult, renderAgentResult } from './agent-contract.js';
 import { JobQueue } from './job-queue.js';
 import { alertEnvironment, markAlertEnvironment, setStatusReaction, slackMessage, stripStatusEmoji } from './slack-status.js';
@@ -23,6 +24,7 @@ import {
 } from './request-policy.js';
 
 const execFileAsync = promisify(execFile);
+const MODY_SKILLS = ['mody-operations', 'mody-dev-operations'];
 
 process.on('unhandledRejection', (reason) => {
   console.error('Unhandled promise rejection:', reason);
@@ -51,10 +53,12 @@ const config = {
   dailyInsightEnabled: process.env.DAILY_INSIGHT_ENABLED !== 'false',
   dailyReportChannelId: process.env.DAILY_REPORT_CHANNEL_ID ?? 'C0C82K2MKRT',
   dailyInsightStateFile: process.env.DAILY_INSIGHT_STATE_FILE ?? path.join(process.cwd(), 'logs', 'daily-insight.json'),
-  useCodexAnalysis: process.env.USE_CODEX_ANALYSIS !== 'false',
-  codexAnalysisModel: process.env.CODEX_ANALYSIS_MODEL ?? 'gpt-6-luna',
-  codexReasoningEffort: process.env.CODEX_REASONING_EFFORT ?? 'medium',
-  codexAnalysisTimeoutMs: Number(process.env.CODEX_ANALYSIS_TIMEOUT_MS ?? 0),
+  useAiAnalysis: process.env.USE_AI_ANALYSIS !== 'false',
+  agyPath: process.env.AGY_PATH ?? path.join(os.homedir(), '.local', 'bin', 'agy'),
+  aiModel: process.env.AI_MODEL ?? 'gemini-4-argon-medium',
+  aiEffort: process.env.AI_EFFORT ?? 'medium',
+  aiAnalysisTimeoutMs: Number(process.env.AI_ANALYSIS_TIMEOUT_MS ?? 0),
+  skillsPath: process.env.MODY_SKILLS_PATH ?? path.join(os.homedir(), '.codex', 'skills'),
   processExistingMessages: process.env.PROCESS_EXISTING_MESSAGES === 'true',
   enablePrivilegedOperations: process.env.ENABLE_PRIVILEGED_OPERATIONS !== 'false',
   pollIntervalMs: Number(process.env.SLACK_POLL_INTERVAL_MS ?? 60_000),
@@ -173,7 +177,7 @@ if (config.dailyInsightEnabled) {
       parseServerError,
       isIgnoredNoise,
       alertEnvironment,
-      analyze: (prompt) => runCodexReadOnly(prompt, null),
+      analyze: (prompt) => runAgentAnalysis(prompt, null),
       post: (channel, threadTs, text) => upsertThreadReply(app.client, { channel, ts: threadTs }, text),
       format: formatForSlack,
     }),
@@ -345,9 +349,8 @@ async function handleAgentRequest(client, event, text) {
         text,
         threadContext,
       });
-      const rawResult = await runCodexOperation(prompt, {
+      const rawResult = await runAgentOperation(prompt, {
         outputSchemaPath: config.agentResultSchemaPath,
-        privileged: true,
       });
       if (!rawResult) {
         throw new Error('empty_agent_result');
@@ -424,6 +427,8 @@ function buildAgentPrompt({ agentInstructions, requestId, requestedEnvironment, 
     '## 이번 실행',
     `- 확인 ID: ${requestId}`,
     `- 요청에 명시된 환경: ${requestedEnvironment}`,
+    `- 조회 스킬: ${skillReference('mody-operations')}`,
+    `- dev 변경 스킬: ${skillReference('mody-dev-operations')}`,
     '',
     '<slack_request>',
     sanitizeSlackText(text),
@@ -648,7 +653,7 @@ async function handlePrivilegedOperation(client, event, text) {
 
   const prompt = [
     'Slack에서 전달된 MODY dev 데이터 보정 요청을 직접 처리한다.',
-    'dev 서버 관련 요청은 $mody-dev-operations 스킬의 SSH, Docker, DB 절차를 따라 직접 실행한다.',
+    `dev 서버 관련 요청은 ${skillReference('mody-dev-operations')}을 먼저 읽고 그 SSH, Docker, DB 절차를 따라 직접 실행한다.`,
     '데이터 변경은 먼저 정확한 대상 수를 조회하고, 최소 범위로 변경한 뒤 같은 조건으로 결과를 검증한다.',
     '코드 수정, 커밋, PR 생성, 머지, 배포는 절대 하지 않는다.',
     '범위가 부족해 안전하게 실행할 수 없으면 필요한 정보만 짧게 질문하고 변경하지 않는다.',
@@ -657,7 +662,7 @@ async function handlePrivilegedOperation(client, event, text) {
     text,
   ].join('\n');
 
-  const result = await runCodexOperation(prompt);
+  const result = await runAgentOperation(prompt);
   await updateMessage(client, progressMessage, result ?? '요청 결과를 확인하지 못했습니다.');
   await markAnswered(client, event);
 }
@@ -672,13 +677,13 @@ async function handleDataReadRequest(client, event, text) {
   await markProcessing(client, event);
   const prompt = [
     `Slack에서 전달된 MODY ${environment} 읽기 요청을 처리한다.`,
-    '반드시 $mody-operations 스킬의 SSH, Docker, DB 절차를 따른다.',
+    `반드시 ${skillReference('mody-operations')}을 먼저 읽고 그 SSH, Docker, DB 절차를 따른다.`,
     '조회만 수행한다. 데이터 변경, 배포, 서비스 재시작, PR 생성, 머지는 절대 하지 않는다.',
     'Slack 최종 답변은 비개발자도 이해할 수 있게 확인 결과와 필요한 다음 조치만 800자 이내로 작성한다. 코드, API, DB, 파일 경로, 서버 주소, 명령어, 비밀값, 내부 실패 내용은 제외한다.',
     '요청:',
     text,
   ].join('\n');
-  const result = await runCodexOperation(prompt);
+  const result = await runAgentOperation(prompt);
   await updateMessage(client, progressMessage, result ?? '현재 확인 결과를 정리하지 못했습니다.');
   await markAnswered(client, event);
 }
@@ -819,11 +824,11 @@ async function claimAlert(event) {
 }
 
 async function analyzeError(error, progress, threadContext = '') {
-  if (config.useCodexAnalysis) {
+  if (config.useAiAnalysis) {
     await progress?.('로컬 코드베이스를 읽고 있습니다. 답변이 준비되면 이 댓글을 갱신하겠습니다.');
-    const codexAnalysis = await analyzeErrorWithCodex(error, progress, threadContext);
-    if (codexAnalysis) {
-      return codexAnalysis;
+    const agentAnalysis = await analyzeErrorWithAgent(error, progress, threadContext);
+    if (agentAnalysis) {
+      return agentAnalysis;
     }
   }
 
@@ -847,11 +852,11 @@ async function analyzeError(error, progress, threadContext = '') {
 }
 
 async function answerRepositoryQuestion(question, progress, threadContext = '') {
-  if (config.useCodexAnalysis) {
+  if (config.useAiAnalysis) {
     await progress?.('로컬 코드베이스를 읽고 있습니다. 답변이 준비되면 이 댓글을 갱신하겠습니다.');
-    const codexAnswer = await answerRepositoryQuestionWithCodex(question, progress, threadContext);
-    if (codexAnswer) {
-      return codexAnswer;
+    const agentAnswer = await answerRepositoryQuestionWithAgent(question, progress, threadContext);
+    if (agentAnswer) {
+      return agentAnswer;
     }
   }
 
@@ -883,7 +888,7 @@ async function answerRepositoryQuestion(question, progress, threadContext = '') 
   ].join('\n');
 }
 
-async function analyzeErrorWithCodex(error, progress, threadContext = '') {
+async function analyzeErrorWithAgent(error, progress, threadContext = '') {
   const prompt = [
     '너는 MODY 운영 지원 assistant다.',
     '사용자가 Slack 에러 thread에서 바로 읽을 답변을 작성한다. 독자는 백엔드 개발자가 아닌 팀원이다.',
@@ -900,7 +905,7 @@ async function analyzeErrorWithCodex(error, progress, threadContext = '') {
     '- 실제 DB 데이터나 배포 로그를 읽지 못한 경우에는 건수와 실제 영향 범위를 확정하지 말고, 확인이 필요하다고 명시한다.',
     '- 확실하지 않은 내용은 추정이라고 표시하고, 가능한 원인 목록은 최대 한 개만 제시한다.',
     '- secrets, .env 원문, 토큰 값은 절대 출력하지 않는다.',
-    '- 현재 dev 데이터나 서버 상태를 확인해야 답변 정확도가 확보되는 경우에는 $mody-dev-operations 스킬의 SSH, Docker, DB 절차로 읽기 전용 조회를 직접 수행한다. 필요하지 않으면 로컬 코드만 확인한다.',
+    `- 현재 dev 데이터나 서버 상태를 확인해야 답변 정확도가 확보되는 경우에는 ${skillReference('mody-dev-operations')}을 읽고 그 SSH, Docker, DB 절차로 읽기 전용 조회를 직접 수행한다. 필요하지 않으면 로컬 코드만 확인한다.`,
     '- dev 데이터 생성·수정, 코드 수정, 커밋, PR 생성, 머지, 배포는 절대 하지 않는다.',
     '- 코드 수정, 커밋, PR 생성, 배포는 하지 않는다.',
     '- 답변은 Slack thread에 들어갈 텍스트이므로 700자 이내로 작성한다.',
@@ -918,19 +923,19 @@ async function analyzeErrorWithCodex(error, progress, threadContext = '') {
     threadContext || '이전 대화 없음',
   ].join('\n');
 
-  const result = await runCodexReadOnly(prompt, progress);
+  const result = await runAgentAnalysis(prompt, progress);
   if (!result) {
     return null;
   }
 
   return {
-    codexText: result,
+    agentText: result,
     hypothesis: '',
     matches: [],
   };
 }
 
-async function answerRepositoryQuestionWithCodex(question, progress, threadContext = '') {
+async function answerRepositoryQuestionWithAgent(question, progress, threadContext = '') {
   const context = await buildQuestionContext(question, progress);
   const prompt = [
     '너는 MODY 기능 지원 assistant다.',
@@ -960,7 +965,7 @@ async function answerRepositoryQuestionWithCodex(question, progress, threadConte
     question,
   ].join('\n');
 
-  return await runCodexOperation(prompt);
+  return await runAgentOperation(prompt);
 }
 
 async function summarizeThread(question, threadContext, progress) {
@@ -985,108 +990,60 @@ async function summarizeThread(question, threadContext, progress) {
     threadContext || 'thread에서 읽을 수 있는 이전 메시지가 없습니다.',
   ].join('\n');
 
-  const result = await runCodexReadOnly(prompt, progress);
+  const result = await runAgentAnalysis(prompt, progress);
   return result || 'thread 내용을 읽었지만 요약을 만들지 못했습니다. 조금 더 구체적으로 다시 요청해주세요.';
 }
 
-async function runCodexReadOnly(prompt, progress) {
+async function runAgentAnalysis(prompt, progress) {
   await progress?.('로컬 코드베이스를 읽고 있습니다. 답변이 준비되면 이 댓글을 갱신하겠습니다.');
-  const outputDir = await mkdtemp(path.join(os.tmpdir(), 'mody-codex-'));
-  const outputPath = path.join(outputDir, 'last-message.txt');
-  const progressTimer = startCodexProgressTimer(progress);
-  const result = await runCodexCommand(prompt, outputPath);
-  if (progressTimer) {
-    clearInterval(progressTimer);
-  }
-
-  let lastMessage = '';
+  const progressTimer = startAgentProgressTimer(progress);
   try {
-    lastMessage = await readFile(outputPath, 'utf8');
-  } catch {
-    lastMessage = '';
+    return await runAgent(prompt, { timeoutMs: config.aiAnalysisTimeoutMs, label: 'analysis' });
   } finally {
-    await rm(outputDir, { recursive: true, force: true });
+    if (progressTimer) {
+      clearInterval(progressTimer);
+    }
   }
-
-  if (result.exitCode !== 0 || !lastMessage.trim()) {
-    console.error('Codex read-only analysis failed:', trimOutput(result.stderr || result.stdout));
-    return null;
-  }
-
-  return trimSlackText(lastMessage.trim());
 }
 
-async function runCodexOperation(prompt, options = {}) {
-  const outputDir = await mkdtemp(path.join(os.tmpdir(), 'mody-codex-operation-'));
-  const outputPath = path.join(outputDir, 'last-message.txt');
-  const modelArg = config.codexAnalysisModel ? `-m ${shellQuote(config.codexAnalysisModel)}` : '';
-  const reasoningArg = shellQuote(`model_reasoning_effort="${config.codexReasoningEffort}"`);
-  const sandboxArgs = options.privileged
-    ? ['--sandbox danger-full-access', '--dangerously-bypass-approvals-and-sandbox']
-    : ['--sandbox read-only'];
-  const command = [
-    'codex exec',
-    modelArg,
-    `-c ${reasoningArg}`,
-    '--cd "$MODY_REPO_PATH"',
-    ...sandboxArgs,
-    options.outputSchemaPath ? '--output-schema "$CODEX_OUTPUT_SCHEMA_PATH"' : '',
-    '--output-last-message "$CODEX_OUTPUT_PATH"',
-    '"$CODEX_PROMPT"',
-    '</dev/null',
-  ].filter(Boolean).join(' ');
-  const result = await runCommand('/bin/zsh', ['-lc', command], {
+async function runAgentOperation(prompt, options = {}) {
+  return await runAgent(prompt, {
     timeoutMs: config.agentTimeoutMs,
+    schemaPath: options.outputSchemaPath,
+    label: 'operation',
+  });
+}
+
+async function runAgent(prompt, { timeoutMs = 0, schemaPath = '', label = 'agent' } = {}) {
+  const args = buildAgyArgs({
+    prompt,
+    model: config.aiModel,
+    effort: config.aiEffort,
+    timeoutMs,
+    schemaPath,
+    addDirs: MODY_SKILLS.map((name) => path.join(config.skillsPath, name)),
+  });
+  const result = await runCommand(config.agyPath, args, {
+    // agy가 --print-timeout으로 먼저 멈추도록 프로세스 강제 종료는 30초 늦춘다. 0은 무제한.
+    timeoutMs: timeoutMs > 0 ? timeoutMs + 30_000 : 0,
     env: buildSafeChildEnvironment(process.env, {
-      CODEX_PROMPT: prompt,
-      CODEX_OUTPUT_PATH: outputPath,
-      CODEX_OUTPUT_SCHEMA_PATH: options.outputSchemaPath ?? '',
       MODY_REPO_PATH: config.repoPath,
     }),
   });
-
-  let lastMessage = '';
-  try {
-    lastMessage = await readFile(outputPath, 'utf8');
-  } catch {
-    lastMessage = '';
-  } finally {
-    await rm(outputDir, { recursive: true, force: true });
-  }
-
-  if (result.exitCode !== 0 || !lastMessage.trim()) {
-    console.error('Codex privileged operation failed:', trimOutput(result.stderr || result.stdout));
+  const answer = result.exitCode === 0 ? parseAgyOutput(result.stdout) : '';
+  if (!answer) {
+    console.error(`agy ${label} failed:`, trimOutput(result.stderr || result.stdout));
     return null;
   }
 
-  return trimSlackText(lastMessage.trim());
+  return trimSlackText(answer);
 }
 
-async function runCodexCommand(prompt, outputPath) {
-  const modelArg = config.codexAnalysisModel ? `-m ${shellQuote(config.codexAnalysisModel)}` : '';
-  const reasoningArg = shellQuote(`model_reasoning_effort="${config.codexReasoningEffort}"`);
-  const command = [
-    'codex exec',
-    modelArg,
-    `-c ${reasoningArg}`,
-    '--cd "$MODY_REPO_PATH"',
-    '--sandbox read-only',
-    '--output-last-message "$CODEX_OUTPUT_PATH"',
-    '"$CODEX_PROMPT"',
-    '</dev/null',
-  ].filter(Boolean).join(' ');
-
-  return await runCommand('/bin/zsh', ['-lc', command], {
-    timeoutMs: config.codexAnalysisTimeoutMs,
-    env: buildSafeChildEnvironment(process.env, {
-      CODEX_PROMPT: prompt,
-      CODEX_OUTPUT_PATH: outputPath,
-      MODY_REPO_PATH: config.repoPath,
-    }),
-  });
+function skillReference(name) {
+  return `\`${name}\` 스킬(${path.join(config.skillsPath, name, 'SKILL.md')})`;
 }
 
-function startCodexProgressTimer(progress) {
+function startAgentProgressTimer(progress) {
   if (!progress) {
     return null;
   }
@@ -1326,8 +1283,8 @@ function buildHypothesis(error) {
 }
 
 function renderErrorAnalysis(error, analysis) {
-  if (analysis.codexText) {
-    return analysis.codexText;
+  if (analysis.agentText) {
+    return analysis.agentText;
   }
 
   return [
@@ -1371,10 +1328,6 @@ function formatForSlack(value) {
     .replace(/^\s{0,3}[-*]\s+/gm, '• ')
     .replace(/\n{3,}/g, '\n\n')
     .trim());
-}
-
-function shellQuote(value) {
-  return `'${String(value).replaceAll("'", "'\\''")}'`;
 }
 
 async function upsertThreadReply(client, event, text) {

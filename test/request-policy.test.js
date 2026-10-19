@@ -39,16 +39,16 @@ test('blocks requests for host files outside the MODY workspace', () => {
   assert.equal(isHostFileRequest('MODY 회원 코드 찾아줘'), false);
 });
 
-test('removes credentials from the Codex child environment', () => {
+test('removes credentials from the agent child environment', () => {
   const env = buildSafeChildEnvironment({
     HOME: '/Users/test',
     PATH: '/usr/bin',
     SLACK_BOT_TOKEN: 'secret',
     OPENAI_API_KEY: 'secret',
     DB_PASSWORD: 'secret',
-  }, { CODEX_PROMPT: 'safe' });
+  }, { MODY_REPO_PATH: 'safe' });
   assert.equal(env.HOME, '/Users/test');
-  assert.equal(env.CODEX_PROMPT, 'safe');
+  assert.equal(env.MODY_REPO_PATH, 'safe');
   assert.equal(env.SLACK_BOT_TOKEN, undefined);
   assert.equal(env.OPENAI_API_KEY, undefined);
   assert.equal(env.DB_PASSWORD, undefined);
