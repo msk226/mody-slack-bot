@@ -73,7 +73,7 @@ export function buildSafeChildEnvironment(source, additions = {}) {
   const blocked = /(?:TOKEN|SECRET|PASSWORD|PASSWD|WEBHOOK|PRIVATE_KEY|API_KEY|CREDENTIAL)/i;
   const allowed = [
     'HOME', 'PATH', 'SHELL', 'USER', 'LOGNAME', 'LANG', 'LC_ALL', 'TMPDIR',
-    'TERM', 'SSH_AUTH_SOCK', 'CODEX_HOME', 'XDG_CONFIG_HOME', 'GITHUB_CONFIG_DIR',
+    'TERM', 'SSH_AUTH_SOCK', 'XDG_CONFIG_HOME', 'GITHUB_CONFIG_DIR',
   ];
   const result = {};
   for (const key of allowed) {
