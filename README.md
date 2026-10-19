@@ -1,6 +1,6 @@
 # MODY Slack 운영 봇
 
-MODY 팀 Slack에서 동작하는 운영 봇입니다. 김민석의 Mac에서 실행됩니다. 에러 채널에 올라온 500 에러를 자동으로 분석하고, 봇을 멘션한 요청을 Codex 에이전트로 처리합니다.
+MODY 팀 Slack에서 동작하는 운영 봇입니다. 김민석의 Mac에서 실행됩니다. 에러 채널에 올라온 500 에러를 자동으로 분석하고, 봇을 멘션한 요청을 Antigravity CLI(`agy`) 에이전트로 처리합니다.
 
 AI 에이전트가 팀 서버에 접근하는 만큼, 무엇을 어디까지 할 수 있는지 먼저 정했습니다. 자세한 내용은 [권한과 안전장치](#권한과-안전장치)에 있습니다.
 
@@ -17,12 +17,12 @@ AI 에이전트가 팀 서버에 접근하는 만큼, 무엇을 어디까지 할
 
 ## 권한과 안전장치
 
-작업 종류에 따라 실행 권한을 나누고, 멘션 작업은 아래 규칙으로 범위를 좁힙니다.
+모든 작업은 `agy`를 샌드박스 없이 실행합니다. 비대화 모드로 돌아야 해서 도구 사용 권한 확인도 건너뜁니다(`--dangerously-skip-permissions`). 그래서 범위는 지침과 요청 분기 코드로 좁힙니다.
 
-| 작업 | 실행 방식 |
+| 작업 | 범위 제한 |
 | --- | --- |
-| 500 에러 분석, thread 요약, 리포트 인사이트 | Codex 읽기 전용 샌드박스에서 실행합니다. |
-| 멘션 작업 (조회, dev 데이터 보정, PR, 배포) | 서버 SSH 접속과 PR 작성이 필요해 샌드박스 없이 실행하고, 아래 규칙으로 범위를 제한합니다. |
+| 500 에러 분석, thread 요약, 리포트 인사이트 | 지침에서 코드 수정, 데이터 변경, 커밋, PR, 배포를 금지합니다. 운영체제 수준에서 막지는 않습니다. |
+| 멘션 작업 (조회, dev 데이터 보정, PR, 배포) | 아래 규칙으로 범위를 제한합니다. |
 
 멘션 작업의 범위 제한:
 
@@ -37,7 +37,7 @@ AI 에이전트가 팀 서버에 접근하는 만큼, 무엇을 어디까지 할
 
 공통:
 
-- Codex에는 허용한 환경변수(`HOME`, `PATH`, `SSH_AUTH_SOCK` 등)만 넘깁니다. 이름에 `TOKEN`, `SECRET`, `PASSWORD`, `API_KEY` 같은 단어가 들어간 변수는 넘기지 않습니다.
+- `agy`에는 허용한 환경변수(`HOME`, `PATH`, `SSH_AUTH_SOCK` 등)만 넘깁니다. 이름에 `TOKEN`, `SECRET`, `PASSWORD`, `API_KEY` 같은 단어가 들어간 변수는 넘기지 않습니다.
 - 감사 기록(`logs/audit/operations.jsonl`)에는 확인 ID, 상태, 환경, 채널, 사용자, 소요 시간만 남깁니다. 요청 본문과 비밀값은 남기지 않습니다.
 - 요청은 MODY 팀 Slack 워크스페이스에서 봇을 멘션할 수 있는 사용자만 할 수 있습니다.
 
@@ -47,16 +47,16 @@ AI 에이전트가 팀 서버에 접근하는 만큼, 무엇을 어디까지 할
 Slack (Socket Mode + 에러 채널 60초 보조 폴링)
 ├─ 에러 채널 500 알림
 │   → 파싱 → 스캐너 요청 제외 → 중복 확인
-│   → Codex 읽기 전용 분석 → thread 답변 → GitHub 이슈 생성·연결
+│   → agy 분석(변경 금지 지침) → thread 답변 → GitHub 이슈 생성·연결
 └─ 봇 멘션
     → 민감 정보·개인 파일 요청 거절
     → 요약·상태·버전 질문은 바로 처리
-    → 그 외: 작업 큐(동시 1건) → Codex 작업 실행(범위 제한 규칙 적용)
+    → 그 외: 작업 큐(동시 1건) → agy 작업 실행(범위 제한 규칙 적용)
       → 결과 JSON 검증 → thread 답변, 감사 기록
 
 매일 09:00 KST → gh workflow run daily-report.yml
 매일 09:00 KST 이후 5분마다 → #10_daily_report에서 어제 날짜 리포트 확인
-    → 이전 리포트·500 에러 수집 → Codex 읽기 전용 분석 → 리포트 thread에 인사이트
+    → 이전 리포트·500 에러 수집 → agy 분석(변경 금지 지침) → 리포트 thread에 인사이트
 ```
 
 ## 실행 환경
@@ -67,10 +67,10 @@ Slack (Socket Mode + 에러 채널 60초 보조 폴링)
 | 재시작 | `run-forever.sh`가 봇이 종료되면 5초 뒤 다시 띄웁니다. 이때 `.env`를 다시 읽습니다. |
 | 잠자기 방지 | launchd `com.mody.keepawake`(`caffeinate -imsu`)가 Mac이 잠들지 않게 합니다. |
 | 자동 시작 | launchd `com.mody.slack-error-harness`는 등록돼 있지만 비활성화 상태입니다. 재부팅 후에는 직접 시작해야 합니다. |
-| AI | Codex CLI(`codex exec`)를 씁니다. ChatGPT 계정으로 로그인하고, 기본 모델은 `gpt-6-luna`입니다. |
+| AI | Antigravity CLI(`~/.local/bin/agy`)를 `agy --print` 비대화 모드로 씁니다. 로그인 정보는 `~/.gemini` 아래에 있고, 기본 모델은 `gemini-4-argon-medium`입니다. |
 | GitHub | `gh` CLI로 이슈를 만들고 워크플로를 실행합니다. |
-| MODY 코드 | Codex는 `~/Desktop/Code/mody-server`에서 작업합니다. |
-| 서버 접근 | SSH 별칭 `mody-dev`·`mody-prod`와 Codex 스킬 `mody-operations`(조회)·`mody-dev-operations`(dev 변경)를 씁니다. |
+| MODY 코드 | `agy`는 `~/Desktop/Code/mody-server`에서 작업합니다. |
+| 서버 접근 | SSH 별칭 `mody-dev`·`mody-prod`와 스킬 `mody-operations`(조회)·`mody-dev-operations`(dev 변경)를 씁니다. 스킬 원본은 `~/.codex/skills`에 있습니다. `agy`는 이 폴더를 자동으로 찾지 않아서, 봇이 두 스킬 폴더를 `--add-dir`로 넘기고 프롬프트에 `SKILL.md` 경로를 적어 읽게 합니다. |
 | Node.js | 현재 v25.5.0에서 실행 중입니다. |
 
 ## 운영 명령
@@ -120,10 +120,12 @@ Slack에서 `@Mody Signal 상태 알려줘`로 실행 중인 작업과 대기 �
 | `DAILY_REPORT_TIME` | 일일 리포트 시각, KST (`09:00`). 인사이트도 이 시각부터 확인합니다 |
 | `DAILY_INSIGHT_ENABLED` | 리포트 인사이트 (`true`) |
 | `DAILY_REPORT_CHANNEL_ID` | 일일 리포트 채널 ID (`C0C82K2MKRT`, #10_daily_report) |
-| `USE_CODEX_ANALYSIS` | 에러 분석에 Codex 사용. `false`면 키워드 코드 검색만 합니다 (`true`) |
-| `CODEX_ANALYSIS_MODEL` | Codex 모델 (`gpt-6-luna`) |
-| `CODEX_REASONING_EFFORT` | Codex 추론 강도 (`medium`) |
-| `CODEX_ANALYSIS_TIMEOUT_MS` | 에러 분석·요약 제한 시간. 0은 무제한 (`0`) |
+| `USE_AI_ANALYSIS` | 에러 분석에 `agy` 사용. `false`면 키워드 코드 검색만 합니다 (`true`) |
+| `AI_MODEL` | `agy` 모델 (`gemini-4-argon-medium`) |
+| `AI_EFFORT` | `agy` 추론 강도, `low`·`medium`·`high`·`xhigh`·`max` 중 하나 (`medium`) |
+| `AI_ANALYSIS_TIMEOUT_MS` | 에러 분석·요약 제한 시간. 0은 무제한 (`0`) |
+| `AGY_PATH` | `agy` 실행 파일 경로 (`~/.local/bin/agy`) |
+| `MODY_SKILLS_PATH` | MODY 스킬 폴더 (`~/.codex/skills`) |
 | `AGENT_TIMEOUT_MS` | 멘션 작업 제한 시간 (`1200000`, 20분) |
 | `AGENT_CONCURRENCY` | 동시에 처리할 멘션 작업 수 (`1`) |
 | `SLACK_POLL_INTERVAL_MS` | 에러 채널 보조 폴링 간격. 0은 끕니다 (`60000`) |
@@ -146,7 +148,7 @@ Slack에서 `@Mody Signal 상태 알려줘`로 실행 중인 작업과 대기 �
 ### 일간 리포트 인사이트
 
 - 09:00(KST)부터 5분마다 #10_daily_report에 어제 날짜 리포트(`MODY 일일 리포트 YYYY-MM-DD`)가 올라왔는지 확인합니다.
-- 리포트가 있으면 아래 자료를 함께 Codex에 넘기고, 리포트 thread에 `데일리 인사이트` 댓글을 남깁니다.
+- 리포트가 있으면 아래 자료를 함께 `agy`에 넘기고, 리포트 thread에 `데일리 인사이트` 댓글을 남깁니다.
   - 최근 리포트 최대 7개
   - 리포트 날짜의 500 에러 알림 집계
 - 댓글은 눈에 띄는 변화, 원인 후보(가능성), 확인해 볼 것으로 600자 안에서 씁니다. 특이사항이 없으면 한 줄만 남깁니다.
@@ -206,9 +208,10 @@ Slack에서 `@Mody Signal 상태 알려줘`로 실행 중인 작업과 대기 �
 
 ```text
 src/
-  index.js                 Slack 이벤트 처리, 요청 분기, Codex 실행
+  index.js                 Slack 이벤트 처리, 요청 분기, agy 실행
+  agent-cli.js             agy 실행 인자 구성, 출력 JSON 파싱
   agent-contract.js        환경 추론, 결과 JSON 파싱, Slack 답변 형식
-  request-policy.js        개인 파일 요청 판별, Codex에 넘길 환경변수 필터
+  request-policy.js        개인 파일 요청 판별, agy에 넘길 환경변수 필터
   job-queue.js             동시 실행 수를 제한하는 작업 큐
   slack-status.js          상태 리액션, 알림 환경 판별
   github-issue.js          에러별 GitHub 이슈 생성·재사용
@@ -237,5 +240,5 @@ npm test        # 단위 테스트
 | --- | --- |
 | 봇이 답하지 않음 | `screen -ls`로 세션을 확인합니다. 없으면 시작 명령을 실행하고 `logs/slack-error-harness.log` 마지막 줄을 봅니다. |
 | 로그에 `ENOTFOUND slack.com` | 네트워크가 끊긴 경우입니다. 감시 스크립트가 자동으로 다시 띄웁니다. |
-| 로그에 `Codex ... failed` | `codex login status`로 ChatGPT 로그인을 확인합니다. Codex가 실패하면 에러 분석은 키워드 검색 결과로 대신 답합니다. |
+| 로그에 `agy ... failed` | `agy models`로 모델 목록이 나오는지 보고 로그인을 확인합니다. 로그인이 풀렸으면 터미널에서 `agy`를 실행해 다시 로그인합니다. `agy`가 실패하면 에러 분석은 키워드 검색 결과로 대신 답합니다. |
 | GitHub 이슈·리포트가 안 됨 | `gh auth status`를 확인합니다. |
