@@ -1,3 +1,5 @@
+const MAX_BODY_LENGTH = 2800;
+
 const ENVIRONMENT_LABELS = {
   dev: '개발',
   prod: '운영',
@@ -64,6 +66,10 @@ export function renderAgentResult(result, requestId) {
     lines.push(...result.warnings.slice(0, 4).map((warning) => `• ${warning}`));
   }
 
-  lines.push('', `_확인 ID: ${requestId}_`);
-  return lines.join('\n');
+  // 본문이 길어도 확인 ID는 남긴다.
+  let body = lines.join('\n');
+  if (body.length > MAX_BODY_LENGTH) {
+    body = `${body.slice(0, MAX_BODY_LENGTH)}\n...`;
+  }
+  return `${body}\n\n_확인 ID: ${requestId}_`;
 }
