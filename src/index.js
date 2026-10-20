@@ -6,6 +6,7 @@ import os from 'node:os';
 import { promisify } from 'node:util';
 import path from 'node:path';
 import { AuditLog } from './audit-log.js';
+import { collectAttachments, createOutputDirectory, removeOutputDirectory, uploadAttachments } from './attachments.js';
 import { buildAgyArgs, parseAgyOutput } from './agent-cli.js';
 import { inferEnvironment, parseAgentResult, renderAgentResult } from './agent-contract.js';
 import { JobQueue } from './job-queue.js';
@@ -71,6 +72,8 @@ const config = {
     ?? path.join(process.cwd(), 'config', 'agent-result.schema.json'),
   handledAlertDirectory: process.env.HANDLED_ALERT_DIRECTORY
     ?? path.join(process.cwd(), 'logs', 'handled-alerts'),
+  agentOutputDirectory: process.env.AGENT_OUTPUT_DIRECTORY
+    ?? path.join(process.cwd(), 'logs', 'outputs'),
   auditDirectory: process.env.AUDIT_DIRECTORY
     ?? path.join(process.cwd(), 'logs', 'audit'),
 };
@@ -323,6 +326,8 @@ async function handleAgentRequest(client, event, text) {
   await setStatusReaction(client, event, 'received');
   const progress = createProgressUpdater(client, progressMessage);
   const requestedEnvironment = inferEnvironment(text);
+  // 결과 파일은 첨부한 뒤 지운다. 개인 식별자가 담길 수 있어 디스크에 남기지 않는다.
+  let outputDir = '';
 
   const { position, promise } = requestQueue.enqueue(requestId, async () => {
     const startedAt = Date.now();
@@ -342,15 +347,18 @@ async function handleAgentRequest(client, event, text) {
       progressHeartbeat = startAgentProgressHeartbeat(progress, requestId, startedAt);
       const threadContext = await buildThreadContext(client, event, progress);
       const agentInstructions = await readFile(config.agentPromptPath, 'utf8');
+      outputDir = await createOutputDirectory(config.agentOutputDirectory, requestId);
       const prompt = buildAgentPrompt({
         agentInstructions,
         requestId,
         requestedEnvironment,
         text,
         threadContext,
+        outputDir,
       });
       const rawResult = await runAgentOperation(prompt, {
         outputSchemaPath: config.agentResultSchemaPath,
+        addDirs: [outputDir],
       });
       if (!rawResult) {
         throw new Error('empty_agent_result');
@@ -365,7 +373,8 @@ async function handleAgentRequest(client, event, text) {
         slackUser: event.user,
         durationMs: Date.now() - startedAt,
       });
-      return { text: renderAgentResult(result, requestId), status: result.status };
+      const attachments = await collectAttachments(outputDir);
+      return { text: renderAgentResult(result, requestId), status: result.status, attachments };
     } catch (error) {
       console.error(`Agent request failed. requestId=${requestId}:`, error.message);
       await auditLog.record({
@@ -393,6 +402,7 @@ async function handleAgentRequest(client, event, text) {
   try {
     const answer = await promise;
     await updateMessage(client, progressMessage, formatForSlack(answer.text));
+    await attachResultFiles(client, event, requestId, answer.attachments);
     await setStatusReaction(client, event, answer.status === 'failed' ? 'failed' : answer.status === 'needs_input' ? 'received' : 'completed');
   } catch {
     await updateMessage(client, progressMessage, [
@@ -405,6 +415,21 @@ async function handleAgentRequest(client, event, text) {
       `_확인 ID: ${requestId}_`,
     ].join('\n'));
     await setStatusReaction(client, event, 'failed');
+  } finally {
+    await removeOutputDirectory(outputDir);
+  }
+}
+
+async function attachResultFiles(client, event, requestId, { files = [], skipped = [] } = {}) {
+  const notes = skipped.map((name) => `• ${name}`);
+  try {
+    await uploadAttachments(client, { channel: event.channel, threadTs: event.thread_ts ?? event.ts, files });
+  } catch (error) {
+    console.error(`Failed to upload attachments. requestId=${requestId}:`, error.data?.error ?? error.message);
+    notes.unshift(...files.map((item) => `• ${item.filename} (업로드 실패: ${error.data?.error ?? error.message})`));
+  }
+  if (notes.length > 0) {
+    await upsertThreadReply(client, event, ['*첨부하지 못한 결과 파일*', ...notes, '', `_확인 ID: ${requestId}_`].join('\n'));
   }
 }
 
@@ -420,7 +445,7 @@ function startAgentProgressHeartbeat(progress, requestId, startedAt) {
   }, 30_000);
 }
 
-function buildAgentPrompt({ agentInstructions, requestId, requestedEnvironment, text, threadContext }) {
+function buildAgentPrompt({ agentInstructions, requestId, requestedEnvironment, text, threadContext, outputDir }) {
   return [
     agentInstructions,
     '',
@@ -429,6 +454,7 @@ function buildAgentPrompt({ agentInstructions, requestId, requestedEnvironment, 
     `- 요청에 명시된 환경: ${requestedEnvironment}`,
     `- 조회 스킬: ${skillReference('mody-operations')}`,
     `- dev 변경 스킬: ${skillReference('mody-dev-operations')}`,
+    `- 결과 파일 폴더: ${outputDir} (긴 목록·표는 여기에 CSV나 TXT로 저장한다. 봇이 스레드에 첨부한다. 본문에는 건수와 파일 이름만 쓴다)`,
     '',
     '<slack_request>',
     sanitizeSlackText(text),
@@ -1010,18 +1036,19 @@ async function runAgentOperation(prompt, options = {}) {
   return await runAgent(prompt, {
     timeoutMs: config.agentTimeoutMs,
     schemaPath: options.outputSchemaPath,
+    addDirs: options.addDirs,
     label: 'operation',
   });
 }
 
-async function runAgent(prompt, { timeoutMs = 0, schemaPath = '', label = 'agent' } = {}) {
+async function runAgent(prompt, { timeoutMs = 0, schemaPath = '', addDirs = [], label = 'agent' } = {}) {
   const args = buildAgyArgs({
     prompt,
     model: config.aiModel,
     effort: config.aiEffort,
     timeoutMs,
     schemaPath,
-    addDirs: MODY_SKILLS.map((name) => path.join(config.skillsPath, name)),
+    addDirs: [...MODY_SKILLS.map((name) => path.join(config.skillsPath, name)), ...addDirs],
   });
   const result = await runCommand(config.agyPath, args, {
     // agy가 --print-timeout으로 먼저 멈추도록 프로세스 강제 종료는 30초 늦춘다. 0은 무제한.

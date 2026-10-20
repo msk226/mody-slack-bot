@@ -1,4 +1,5 @@
-const MAX_BODY_LENGTH = 2800;
+// formatForSlack이 2800자에서 한 번 더 자르므로 확인 ID 줄이 들어갈 자리를 남긴다.
+const MAX_BODY_LENGTH = 2700;
 
 const ENVIRONMENT_LABELS = {
   dev: '개발',
