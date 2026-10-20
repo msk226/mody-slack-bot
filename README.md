@@ -134,7 +134,9 @@ Slack에서 `@Mody Signal 상태 알려줘`로 실행 중인 작업과 대기 �
 | `SLACK_BOT_USER_ID`, `SLACK_BOT_ID` | 비우면 시작할 때 Slack에서 조회합니다 |
 | `ENABLE_PRIVILEGED_OPERATIONS` | 현재 코드에서 읽지 않습니다. 값과 관계없이 멘션 작업은 [권한과 안전장치](#권한과-안전장치)의 방식으로 실행됩니다 (`true`) |
 
-파일 위치는 `AGENT_PROMPT_PATH`, `AGENT_RESULT_SCHEMA_PATH`, `ERROR_ISSUE_CACHE_FILE`, `DAILY_REPORT_STATE_FILE`, `DAILY_INSIGHT_STATE_FILE`, `HANDLED_ALERT_DIRECTORY`, `AUDIT_DIRECTORY`로 바꿀 수 있습니다. 기본값은 `prompts/`, `config/`, `logs/` 아래입니다.
+파일 위치는 `AGENT_PROMPT_PATH`, `AGENT_RESULT_SCHEMA_PATH`, `ERROR_ISSUE_CACHE_FILE`, `DAILY_REPORT_STATE_FILE`, `DAILY_INSIGHT_STATE_FILE`, `HANDLED_ALERT_DIRECTORY`, `AGENT_OUTPUT_DIRECTORY`, `AUDIT_DIRECTORY`로 바꿀 수 있습니다. 기본값은 `prompts/`, `config/`, `logs/` 아래입니다.
+
+에이전트가 긴 목록을 `logs/outputs/<확인 ID>/`에 파일로 남기면, 봇이 요청한 스레드에 첨부하고 폴더를 지웁니다. 한 번에 5개까지, 파일 하나에 20MB까지 첨부합니다. 첨부하려면 봇 토큰에 `files:write` 권한이 있어야 합니다.
 
 ## Slack 사용법
 
