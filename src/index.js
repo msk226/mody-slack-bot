@@ -1036,7 +1036,8 @@ async function runAgent(prompt, { timeoutMs = 0, schemaPath = '', label = 'agent
     return null;
   }
 
-  return trimSlackText(answer);
+  // 스키마 결과는 JSON이라 여기서 자르면 파싱이 깨진다. 길이는 renderAgentResult가 맞춘다.
+  return schemaPath ? answer : trimSlackText(answer);
 }
 
 function skillReference(name) {

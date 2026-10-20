@@ -25,3 +25,13 @@ test('renders a consistent Slack response', () => {
   assert.match(rendered, /환경: 운영/);
   assert.match(rendered, /확인 ID: MODY-20260920-0001/);
 });
+
+test('keeps the request id when a long result is cut', () => {
+  const longValue = 'a'.repeat(5000);
+  const raw = JSON.stringify({ status: 'completed', environment: 'prod', summary: '추출했습니다.', explanation: longValue });
+  assert.ok(raw.length > 2800);
+
+  const rendered = renderAgentResult(parseAgentResult(raw), 'MODY-20261020-0001');
+  assert.ok(rendered.length < 3000);
+  assert.match(rendered, /\n\.\.\.\n\n_확인 ID: MODY-20261020-0001_$/);
+});
