@@ -36,6 +36,19 @@ load_env() {
 echo "$$" > "$PID_FILE"
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] supervisor started. pid=$$" >> "$LOG_FILE"
 
+# 봇 전용 mody-server 클론을 1시간마다 최신 main으로 맞춘다.
+load_env
+if [[ -n "${MODY_REPO_PATH:-}" && -d "$MODY_REPO_PATH/.git" ]]; then
+  (
+    while true; do
+      git -C "$MODY_REPO_PATH" pull -q --ff-only >> "$LOG_FILE" 2>&1 || true
+      sleep 3600
+    done
+  ) &
+  REPO_SYNC_PID=$!
+  trap 'kill "$REPO_SYNC_PID" 2>/dev/null; cleanup' EXIT INT TERM
+fi
+
 while true; do
   load_env
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] bot process starting" >> "$LOG_FILE"
