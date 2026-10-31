@@ -12,17 +12,18 @@
 | 자동 시작 | launchd `com.mody.slack-error-harness`는 등록돼 있지만 비활성화 상태입니다. 재부팅 후에는 직접 시작해야 합니다. |
 | AI | Antigravity CLI(`~/.local/bin/agy`)를 `agy --print` 비대화 모드로 씁니다. 로그인 정보는 `~/.gemini` 아래에 있고, 기본 모델은 `gemini-4-argon-medium`입니다. |
 | GitHub | `gh` CLI로 이슈를 만들고 워크플로를 실행합니다. |
-| MODY 코드 | `agy`는 `~/Desktop/Code/mody-server`에서 작업합니다. |
+| MODY 코드 | `agy`는 `~/Code/mody-server`에서 작업합니다. |
 | 서버 접근 | SSH 별칭 `mody-dev`·`mody-prod`와 스킬 `mody-operations`(조회)·`mody-dev-operations`(dev 변경)를 씁니다. 스킬 원본은 `~/.codex/skills`에 있습니다. `agy`는 이 폴더를 자동으로 찾지 않아서, 봇이 두 스킬 폴더를 `--add-dir`로 넘기고 프롬프트에 `SKILL.md` 경로를 적어 읽게 합니다. |
+| 코드 동기화 | `run-forever.sh`가 1시간마다 `MODY_REPO_PATH`의 클론을 최신 main으로 맞춥니다(`git pull --ff-only`). |
 | Node.js | 현재 v25.5.0에서 실행 중입니다. |
 
 ## 운영 명령
 
-모든 명령은 이 폴더(`~/Desktop/Code/mody-slack-bot`)에서 실행합니다.
+모든 명령은 이 폴더(`~/Code/mody-slack-bot`)에서 실행합니다.
 
 ```bash
 # 시작 (재부팅 후 등)
-screen -dmS mody-slack-bot /bin/zsh -lc 'cd ~/Desktop/Code/mody-slack-bot && exec bash scripts/run-forever.sh'
+screen -dmS mody-slack-bot /bin/zsh -lc 'cd ~/Code/mody-slack-bot && exec bash scripts/run-forever.sh'
 
 # 실행 확인
 screen -ls
@@ -48,13 +49,13 @@ Slack에서 `@Mody Signal 상태 알려줘`로 실행 중인 작업과 대기 �
 | `SLACK_BOT_TOKEN` | 봇 토큰 (`xoxb-`) |
 | `SLACK_APP_TOKEN` | Socket Mode 앱 토큰 (`xapp-`) |
 | `SLACK_ERROR_CHANNEL_ID` | 500 에러 알림이 올라오는 채널 ID |
+| `MODY_REPO_PATH` | MODY 서버 코드 경로 |
+| `GITHUB_REPO` | 이슈·리포트 대상 저장소 (`owner/repo` 형식) |
 
 선택 (괄호 안은 기본값):
 
 | 변수 | 설명 |
 | --- | --- |
-| `MODY_REPO_PATH` | MODY 서버 코드 경로 (`~/Desktop/Code/mody-server`) |
-| `GITHUB_REPO` | 이슈·리포트 대상 저장소 (`Central-MakeUs/mody-server`) |
 | `AUTO_ANALYZE_ERRORS` | 500 에러 자동 분석 (`true`) |
 | `AUTO_CREATE_ISSUES` | 에러별 GitHub 이슈 생성 (`true`) |
 | `GITHUB_ISSUE_LABELS` | 이슈 라벨, 쉼표로 구분 (`bug`) |
@@ -62,7 +63,7 @@ Slack에서 `@Mody Signal 상태 알려줘`로 실행 중인 작업과 대기 �
 | `DAILY_REPORT_TRIGGER_ENABLED` | 일일 리포트 실행 (`true`) |
 | `DAILY_REPORT_TIME` | 일일 리포트 시각, KST (`09:00`). 인사이트도 이 시각부터 확인합니다 |
 | `DAILY_INSIGHT_ENABLED` | 리포트 인사이트 (`true`) |
-| `DAILY_REPORT_CHANNEL_ID` | 일일 리포트 채널 ID (#10_daily_report 채널 ID) |
+| `DAILY_REPORT_CHANNEL_ID` | 일일 리포트 채널 ID. 비우면 리포트 인사이트를 끕니다 |
 | `USE_AI_ANALYSIS` | 에러 분석에 `agy` 사용. `false`면 키워드 코드 검색만 합니다 (`true`) |
 | `AI_MODEL` | `agy` 모델 (`gemini-4-argon-medium`) |
 | `AI_EFFORT` | `agy` 추론 강도, `low`·`medium`·`high`·`xhigh`·`max` 중 하나 (`medium`) |

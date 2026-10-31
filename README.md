@@ -1,15 +1,15 @@
 # MODY Slack 운영 봇
 
-> 500 에러가 올라오면 원인을 먼저 찾아 두고, 멘션 한 줄로 데이터 조회부터 PR까지 처리하는 팀 운영 봇
+> MODY 팀 Slack에서 500 에러 분석, 데이터 조회, 수정 PR을 처리하는 운영 봇
 
 ![Node.js](https://img.shields.io/badge/Node.js-ESM-339933?logo=nodedotjs&logoColor=white)
 ![Slack Bolt](https://img.shields.io/badge/Slack-Bolt%20·%20Socket%20Mode-4A154B?logo=slack&logoColor=white)
 ![AI Agent](https://img.shields.io/badge/Agent-Antigravity%20CLI-4285F4?logo=googlegemini&logoColor=white)
 ![Tests](https://img.shields.io/badge/tests-34%20passing-brightgreen)
 
-MODY 팀 Slack에서 돌아가는 운영 봇입니다. 에러 알림이 올라오면 사람이 보기 전에 코드를 읽고 원인 후보와 GitHub 이슈를 남깁니다. 팀원은 봇을 멘션해서 코드 확인, 데이터 조회, dev 데이터 보정, 수정 PR까지 맡길 수 있습니다.
+에러 알림이 올라오면 서버 코드를 읽고 원인 후보와 GitHub 이슈를 남깁니다. 팀원은 봇을 멘션해서 코드 확인, 데이터 조회, dev 데이터 보정, 수정 PR까지 맡길 수 있습니다.
 
-AI 에이전트가 팀 서버에 접근하는 만큼, **무엇을 어디까지 할 수 있는지부터 정했습니다.** 이 README도 그 순서로 씁니다.
+AI 에이전트가 팀 서버에 접근하므로, 할 수 있는 일의 범위를 먼저 정했습니다.
 
 ## 하는 일
 
@@ -87,7 +87,7 @@ flowchart TD
 
 요약·상태 질문이어도 서버, 데이터, PR 같은 대상이나 작업이 함께 있으면 에이전트 작업으로 넘깁니다. "운영 서버 상태 확인해줘"는 봇 상태가 아니라 서버 상태를 확인합니다. 판별 규칙은 [`src/request-policy.js`](src/request-policy.js)와 테스트에 있습니다.
 
-## 놓치지 않게 만든 것들
+## 안정성
 
 - **Socket Mode + 보조 폴링:** 이벤트를 놓쳐도 에러 채널을 60초마다 다시 확인합니다. 폴링이 2분 넘게 실패하면 프로세스를 재시작합니다.
 - **중복 방지:** 같은 에러(메서드·경로·예외·첫 스택 프레임)는 30분 안에 한 번만 분석하고, 열린 이슈가 있으면 새로 만들지 않습니다.
@@ -111,7 +111,7 @@ flowchart TD
 ```bash
 npm install
 npm test
-npm start      # .env 필요
+npm start      # .env 필요 (docs/operations.md 참고)
 ```
 
 설정(`.env`), 운영 명령, Slack 사용법, 로그 파일, 문제 해결은 [docs/operations.md](docs/operations.md)에 있습니다.

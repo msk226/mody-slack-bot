@@ -41,8 +41,8 @@ const config = {
   slackAppToken: requiredEnv('SLACK_APP_TOKEN'),
   slackBotToken: requiredEnv('SLACK_BOT_TOKEN'),
   errorChannelId: requiredEnv('SLACK_ERROR_CHANNEL_ID'),
-  repoPath: process.env.MODY_REPO_PATH ?? '/Users/minseokkim/Desktop/Code/mody-server',
-  githubRepo: process.env.GITHUB_REPO ?? 'Central-MakeUs/mody-server',
+  repoPath: requiredEnv('MODY_REPO_PATH'),
+  githubRepo: requiredEnv('GITHUB_REPO'),
   autoAnalyzeErrors: process.env.AUTO_ANALYZE_ERRORS !== 'false',
   autoCreateIssues: process.env.AUTO_CREATE_ISSUES !== 'false',
   ghPath: process.env.GH_PATH ?? '/opt/homebrew/bin/gh',
@@ -51,8 +51,8 @@ const config = {
   dailyReportTriggerEnabled: process.env.DAILY_REPORT_TRIGGER_ENABLED !== 'false',
   dailyReportTime: process.env.DAILY_REPORT_TIME ?? '09:00',
   dailyReportStateFile: process.env.DAILY_REPORT_STATE_FILE ?? path.join(process.cwd(), 'logs', 'daily-report-trigger.json'),
-  dailyInsightEnabled: process.env.DAILY_INSIGHT_ENABLED !== 'false',
-  dailyReportChannelId: process.env.DAILY_REPORT_CHANNEL_ID ?? 'C0C82K2MKRT',
+  dailyInsightEnabled: process.env.DAILY_INSIGHT_ENABLED !== 'false' && Boolean(process.env.DAILY_REPORT_CHANNEL_ID),
+  dailyReportChannelId: process.env.DAILY_REPORT_CHANNEL_ID ?? '',
   dailyInsightStateFile: process.env.DAILY_INSIGHT_STATE_FILE ?? path.join(process.cwd(), 'logs', 'daily-insight.json'),
   useAiAnalysis: process.env.USE_AI_ANALYSIS !== 'false',
   agyPath: process.env.AGY_PATH ?? path.join(os.homedir(), '.local', 'bin', 'agy'),
@@ -77,6 +77,8 @@ const config = {
   auditDirectory: process.env.AUDIT_DIRECTORY
     ?? path.join(process.cwd(), 'logs', 'audit'),
 };
+
+const repoLinkPattern = new RegExp(`\\[([^\\]]+)]\\((?:${escapeRegExp(config.repoPath)}/)?([^)]+)\\)`, 'g');
 
 const app = new App({
   token: config.slackBotToken,
@@ -451,6 +453,7 @@ function buildAgentPrompt({ agentInstructions, requestId, requestedEnvironment, 
     '',
     '## 이번 실행',
     `- 확인 ID: ${requestId}`,
+    `- MODY 저장소: ${config.repoPath}`,
     `- 요청에 명시된 환경: ${requestedEnvironment}`,
     `- 조회 스킬: ${skillReference('mody-operations')}`,
     `- dev 변경 스킬: ${skillReference('mody-dev-operations')}`,
@@ -1348,10 +1351,14 @@ function trimSlackText(value) {
   return trimmed.length <= 2800 ? trimmed : `${trimmed.slice(0, 2800)}\n...`;
 }
 
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 function formatForSlack(value) {
   return trimSlackText(String(value)
     .replace(/^#{1,6}\s+(.+)$/gm, '*$1*')
-    .replace(/\[([^\]]+)]\((?:\/Users\/minseokkim\/Desktop\/Code\/mody-server\/)?([^)]+)\)/g, '`$2`')
+    .replace(repoLinkPattern, '`$2`')
     .replace(/\[([^\]]+)]\((https?:\/\/[^)]+)\)/g, '<$2|$1>')
     .replace(/^\s{0,3}[-*]\s+/gm, '• ')
     .replace(/\n{3,}/g, '\n\n')
