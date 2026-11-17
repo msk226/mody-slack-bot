@@ -5,7 +5,7 @@
 ![Node.js](https://img.shields.io/badge/Node.js-ESM-339933?logo=nodedotjs&logoColor=white)
 ![Slack Bolt](https://img.shields.io/badge/Slack-Bolt%20·%20Socket%20Mode-4A154B?logo=slack&logoColor=white)
 ![AI Agent](https://img.shields.io/badge/Agent-Antigravity%20CLI-4285F4?logo=googlegemini&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-34%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-42%20passing-brightgreen)
 
 에러 알림이 올라오면 서버 코드를 읽고 원인 후보와 GitHub 이슈를 남깁니다. 팀원은 봇을 멘션해서 코드 확인, 데이터 조회, dev 데이터 보정, 수정 PR까지 맡길 수 있습니다.
 
@@ -16,6 +16,7 @@ AI 에이전트가 팀 서버에 접근하므로, 할 수 있는 일의 범위�
 | 기능 | 동작 |
 | --- | --- |
 | 🚨 **500 에러 분석** | 에러 채널 알림을 읽고 서버 코드를 읽기 전용으로 분석해 thread에 원인 후보를 답합니다. 같은 에러의 GitHub 이슈를 만들거나, 열린 이슈가 있으면 연결합니다. |
+| 📈 **Grafana 알럿 분석** | 에러 채널에 `FIRING` 알럿이 오면 운영 지표(Prometheus)·로그(Loki)·코드를 읽기 전용으로 확인해 *무슨 일인지 · 원인 · 영향 · 조치* 양식으로 thread에 답합니다. 알럿 thread에서 봇을 멘션하면 그 알럿을 대상으로 다시 분석합니다. |
 | 💬 **멘션 작업** | 코드 확인, dev/prod 데이터 조회, dev 데이터 보정, 코드 수정·PR·배포 요청을 처리합니다. |
 | 📝 **thread 요약** | thread 대화를 요약합니다. |
 | 📊 **일일 리포트 인사이트** | 매일 리포트 워크플로를 실행하고, 리포트가 올라오면 지난 리포트·같은 날 500 에러와 함께 읽어 인사이트를 남깁니다. |
@@ -39,6 +40,7 @@ AI 에이전트가 팀 서버에 접근하므로, 할 수 있는 일의 범위�
 **환경 분리**
 - 환경을 적지 않으면 dev로 처리합니다.
 - 운영(prod)은 요청에 `운영`·`prod`·`prd`를 적었을 때만, **조회 전용** 스킬로 접근합니다. 데이터 변경 절차는 dev용만 둡니다.
+- 예외는 Grafana 알럿 분석입니다. 알럿은 항상 운영에서 오므로 환경을 적지 않아도 prod를 봅니다. 대신 지침에서 읽기만 허용하고 데이터 변경, 재시작, 배포, 알럿 설정 변경, 코드 수정을 금지합니다. 답변에는 회원·그룹 ID, SQL, 서버 주소를 쓰지 않습니다.
 
 **에이전트에 넘기는 것**
 - 허용한 환경변수(`HOME`, `PATH`, `SSH_AUTH_SOCK` 등)만 넘깁니다. 이름에 `TOKEN`, `SECRET`, `PASSWORD`, `API_KEY`가 들어간 변수는 넘기지 않습니다.
@@ -59,6 +61,12 @@ flowchart TD
     E --> E1[파싱 · 스캐너 요청 제외 · 30분 중복 확인]
     E1 --> E2[에이전트 분석<br/>변경 금지 지침]
     E2 --> E3[thread 답변 + GitHub 이슈 생성·연결]
+
+    S --> G[에러 채널 Grafana FIRING 알럿]
+    G --> G1[알럿 파싱 · 중복 확인]
+    G1 --> G2[작업 큐 → 에이전트 분석<br/>prod 읽기 전용 · 지표·로그·코드]
+    G2 --> G3[결과 JSON 스키마 검증]
+    G3 --> G4[thread에 원인·영향·조치]
 
     S --> M[봇 멘션]
     M --> M1{요청 분기}
@@ -93,7 +101,7 @@ flowchart TD
 - **중복 방지:** 같은 에러(메서드·경로·예외·첫 스택 프레임)는 30분 안에 한 번만 분석하고, 열린 이슈가 있으면 새로 만들지 않습니다.
 - **재시도 상한:** 리포트 인사이트가 실패하면 30분 뒤 다시 시도하되, 같은 날짜는 3번까지만 시도합니다.
 - **긴 결과:** 에이전트가 남긴 긴 목록은 thread에 파일로 첨부합니다.
-- **에이전트 실패 시:** 에러 분석은 키워드 코드 검색 결과로 대신 답합니다.
+- **에이전트 실패 시:** 에러 분석은 키워드 코드 검색 결과로 대신 답합니다. 알럿 분석은 알럿 내용만 정리해 답합니다.
 
 ## 기술 스택
 
@@ -104,7 +112,7 @@ flowchart TD
 | AI 에이전트 | Antigravity CLI (`agy --print` 비대화 모드) |
 | GitHub | `gh` CLI (이슈 생성, 워크플로 실행) |
 | 실행 | 로컬 Mac · `screen` + 자동 재시작 스크립트 |
-| Test | `node --test` (34개) |
+| Test | `node --test` (42개) |
 
 ## 시작하기
 
@@ -128,9 +136,11 @@ src/
   github-issue.js          에러별 GitHub 이슈 생성·재사용
   daily-report-trigger.js  일일 리포트 워크플로 실행
   daily-insight.js         일일 리포트 인사이트
+  grafana-alert.js         Grafana 알럿 파싱, 분석 지침, 결과 형식
   attachments.js           긴 결과 파일 첨부
   audit-log.js             감사 기록
 prompts/mody-agent.md      에이전트 지침
 config/agent-result.schema.json  결과 JSON 스키마
+config/alert-analysis.schema.json  알럿 분석 결과 JSON 스키마
 docs/operations.md         운영 가이드
 ```
