@@ -10,6 +10,15 @@ import { collectAttachments, createOutputDirectory, removeOutputDirectory, uploa
 import { buildAgyArgs, parseAgyOutput } from './agent-cli.js';
 import { inferEnvironment, parseAgentResult, renderAgentResult } from './agent-contract.js';
 import { JobQueue } from './job-queue.js';
+import {
+  alertFingerprint,
+  buildAlertPrompt,
+  messageText,
+  parseAlertAnalysis,
+  parseGrafanaAlert,
+  renderAlertAnalysis,
+  renderAlertFallback,
+} from './grafana-alert.js';
 import { alertEnvironment, markAlertEnvironment, setStatusReaction, slackMessage, stripStatusEmoji } from './slack-status.js';
 import { ensureErrorIssue } from './github-issue.js';
 import { startDailyReportTrigger } from './daily-report-trigger.js';
@@ -70,6 +79,8 @@ const config = {
     ?? path.join(process.cwd(), 'prompts', 'mody-agent.md'),
   agentResultSchemaPath: process.env.AGENT_RESULT_SCHEMA_PATH
     ?? path.join(process.cwd(), 'config', 'agent-result.schema.json'),
+  alertAnalysisSchemaPath: process.env.ALERT_ANALYSIS_SCHEMA_PATH
+    ?? path.join(process.cwd(), 'config', 'alert-analysis.schema.json'),
   handledAlertDirectory: process.env.HANDLED_ALERT_DIRECTORY
     ?? path.join(process.cwd(), 'logs', 'handled-alerts'),
   agentOutputDirectory: process.env.AGENT_OUTPUT_DIRECTORY
@@ -113,6 +124,10 @@ app.event('message', async ({ event, client }) => {
   }
 
   if (!config.autoAnalyzeErrors || event.channel !== config.errorChannelId) {
+    return;
+  }
+
+  if (await handleGrafanaAlertMessage(client, event)) {
     return;
   }
 
@@ -212,6 +227,14 @@ async function processMention(event, client, text, options = {}) {
     }
   }
 
+  if (!requestText && event.thread_ts) {
+    const threadAlert = await findThreadGrafanaAlert(client, event);
+    if (threadAlert) {
+      await analyzeGrafanaAlert(client, event, threadAlert, '');
+      return;
+    }
+  }
+
   if (!requestText) {
     waitForMentionRequest(event, client);
     return;
@@ -265,7 +288,107 @@ async function processMention(event, client, text, options = {}) {
     return;
   }
 
+  // Grafana 알럿 스레드에서 멘션하면 알럿 원인 분석으로 처리한다.
+  const threadAlert = event.thread_ts ? await findThreadGrafanaAlert(client, event) : null;
+  if (threadAlert) {
+    await analyzeGrafanaAlert(client, event, threadAlert, text);
+    return;
+  }
+
   await handleAgentRequest(client, event, text);
+}
+
+// Grafana 알럿 메시지면 true. FIRING만 자동 분석하고 RESOLVED는 넘긴다.
+async function handleGrafanaAlertMessage(client, event) {
+  const alert = parseGrafanaAlert(event);
+  if (!alert) {
+    return false;
+  }
+  if (alert.state !== 'FIRING') {
+    return true;
+  }
+  if (isDuplicate(alertFingerprint(alert)) || !await claimAlert(event)) {
+    return true;
+  }
+  await analyzeGrafanaAlert(client, event, alert, '');
+  return true;
+}
+
+async function findThreadGrafanaAlert(client, event) {
+  const messages = await getThreadReplies(client, event.channel, event.thread_ts);
+  const parent = messages.find((message) => message.ts === event.thread_ts);
+  return parent ? parseGrafanaAlert(parent) : null;
+}
+
+async function analyzeGrafanaAlert(client, event, alert, requestText) {
+  const requestId = createRequestId(event);
+  const progressMessage = await upsertThreadReply(
+    client,
+    event,
+    `:확인중: Grafana 알럿을 확인했습니다. 운영 지표와 로그를 조사하겠습니다.\n_확인 ID: ${requestId}_`,
+  );
+  await setStatusReaction(client, event, 'received');
+  const progress = createProgressUpdater(client, progressMessage);
+
+  const { promise } = requestQueue.enqueue(requestId, async () => {
+    const startedAt = Date.now();
+    await auditLog.record({
+      requestId,
+      type: 'grafana_alert',
+      status: 'started',
+      environment: 'prod',
+      slackChannel: event.channel,
+      slackUser: event.user ?? 'grafana',
+    });
+    await markProcessing(client, event);
+    await progress(':loading: 운영 Prometheus·Loki·코드를 보며 원인을 조사하고 있습니다.', { force: true });
+    const heartbeat = startAgentProgressHeartbeat(progress, requestId, startedAt);
+    try {
+      const threadContext = await buildThreadContext(client, event, null);
+      const prompt = buildAlertPrompt({
+        alert,
+        requestText: requestText ? sanitizeSlackText(requestText) : '',
+        threadContext,
+        requestId,
+        repoPath: config.repoPath,
+        skillPath: path.join(config.skillsPath, 'mody-operations', 'SKILL.md'),
+      });
+      const raw = await runAgentOperation(prompt, { outputSchemaPath: config.alertAnalysisSchemaPath });
+      if (!raw) {
+        throw new Error('empty_agent_result');
+      }
+      const result = parseAlertAnalysis(raw);
+      await auditLog.record({
+        requestId,
+        type: 'grafana_alert',
+        status: result.status,
+        environment: 'prod',
+        slackChannel: event.channel,
+        durationMs: Date.now() - startedAt,
+      });
+      return result;
+    } finally {
+      clearInterval(heartbeat);
+    }
+  });
+
+  try {
+    const result = await promise;
+    await updateMessage(client, progressMessage, renderAlertAnalysis(result, requestId));
+    await setStatusReaction(client, event, result.status === 'failed' ? 'failed' : 'completed');
+  } catch (error) {
+    console.error(`Grafana alert analysis failed. requestId=${requestId}:`, error.message);
+    await auditLog.record({
+      requestId,
+      type: 'grafana_alert',
+      status: 'failed',
+      environment: 'prod',
+      slackChannel: event.channel,
+      errorCode: error.message,
+    });
+    await updateMessage(client, progressMessage, renderAlertFallback(alert, requestId));
+    await setStatusReaction(client, event, 'failed');
+  }
 }
 
 function waitForMentionRequest(event, client) {
@@ -533,6 +656,10 @@ async function processPolledMessage(message) {
   }
 
   if (!config.autoAnalyzeErrors) {
+    return;
+  }
+
+  if (await handleGrafanaAlertMessage(app.client, event)) {
     return;
   }
 
@@ -1392,6 +1519,7 @@ async function buildThreadContext(client, event, progress) {
   const messages = await getThreadReplies(client, event.channel, threadTs);
   const relevantMessages = messages
     .filter((message) => message.ts !== event.ts)
+    .map((message) => ({ ...message, text: messageText(message) }))
     .filter((message) => !isProgressText(message.text))
     .filter((message) => message.text)
     .slice(-30);

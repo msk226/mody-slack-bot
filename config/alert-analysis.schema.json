@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["status", "title", "what", "cause", "impact", "actions", "notes"],
+  "properties": {
+    "status": { "type": "string", "enum": ["completed", "failed"] },
+    "title": { "type": "string" },
+    "what": { "type": "array", "items": { "type": "string" } },
+    "cause": { "type": "array", "items": { "type": "string" } },
+    "impact": { "type": "array", "items": { "type": "string" } },
+    "actions": { "type": "array", "items": { "type": "string" } },
+    "notes": { "type": "array", "items": { "type": "string" } }
+  }
+}
