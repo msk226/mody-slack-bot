@@ -5,7 +5,7 @@ import { buildAgyArgs, parseAgyOutput } from '../src/agent-cli.js';
 test('builds non-interactive agy arguments with the prompt attached last', () => {
   const args = buildAgyArgs({
     prompt: '--model 처럼 보이는 프롬프트',
-    model: 'gemini-4-argon-medium',
+    model: 'gemini-4-neon-medium',
     effort: 'medium',
     timeoutMs: 1_200_000,
     schemaPath: '/tmp/schema.json',
@@ -14,7 +14,7 @@ test('builds non-interactive agy arguments with the prompt attached last', () =>
   assert.deepEqual(args, [
     '--output-format', 'json',
     '--dangerously-skip-permissions',
-    '--model', 'gemini-4-argon-medium',
+    '--model', 'gemini-4-neon-medium',
     '--effort', 'medium',
     '--print-timeout', '1200s',
     '--json-schema', '/tmp/schema.json',

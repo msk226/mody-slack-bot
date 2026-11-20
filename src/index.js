@@ -65,7 +65,7 @@ const config = {
   dailyInsightStateFile: process.env.DAILY_INSIGHT_STATE_FILE ?? path.join(process.cwd(), 'logs', 'daily-insight.json'),
   useAiAnalysis: process.env.USE_AI_ANALYSIS !== 'false',
   agyPath: process.env.AGY_PATH ?? path.join(os.homedir(), '.local', 'bin', 'agy'),
-  aiModel: process.env.AI_MODEL ?? 'gemini-4-argon-medium',
+  aiModel: process.env.AI_MODEL ?? 'gemini-4-neon-medium',
   aiEffort: process.env.AI_EFFORT ?? 'medium',
   aiAnalysisTimeoutMs: Number(process.env.AI_ANALYSIS_TIMEOUT_MS ?? 0),
   skillsPath: process.env.MODY_SKILLS_PATH ?? path.join(os.homedir(), '.codex', 'skills'),

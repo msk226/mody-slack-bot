@@ -10,7 +10,7 @@
 | 재시작 | `run-forever.sh`가 봇이 종료되면 5초 뒤 다시 띄웁니다. 이때 `.env`를 다시 읽습니다. |
 | 잠자기 방지 | launchd `com.mody.keepawake`(`caffeinate -imsu`)가 Mac이 잠들지 않게 합니다. |
 | 자동 시작 | launchd `com.mody.slack-error-harness`는 등록돼 있지만 비활성화 상태입니다. 재부팅 후에는 직접 시작해야 합니다. |
-| AI | Antigravity CLI(`~/.local/bin/agy`)를 `agy --print` 비대화 모드로 씁니다. 로그인 정보는 `~/.gemini` 아래에 있고, 기본 모델은 `gemini-4-argon-medium`입니다. |
+| AI | Antigravity CLI(`~/.local/bin/agy`)를 `agy --print` 비대화 모드로 씁니다. 로그인 정보는 `~/.gemini` 아래에 있고, 기본 모델은 `gemini-4-neon-medium`입니다. |
 | GitHub | `gh` CLI로 이슈를 만들고 워크플로를 실행합니다. |
 | MODY 코드 | `agy`는 `~/Code/mody-server`에서 작업합니다. |
 | 서버 접근 | SSH 별칭 `mody-dev`·`mody-prod`와 스킬 `mody-operations`(조회)·`mody-dev-operations`(dev 변경)를 씁니다. 스킬 원본은 `~/.codex/skills`에 있습니다. `agy`는 이 폴더를 자동으로 찾지 않아서, 봇이 두 스킬 폴더를 `--add-dir`로 넘기고 프롬프트에 `SKILL.md` 경로를 적어 읽게 합니다. |
@@ -65,7 +65,7 @@ Slack에서 `@Mody Signal 상태 알려줘`로 실행 중인 작업과 대기 �
 | `DAILY_INSIGHT_ENABLED` | 리포트 인사이트 (`true`) |
 | `DAILY_REPORT_CHANNEL_ID` | 일일 리포트 채널 ID. 비우면 리포트 인사이트를 끕니다 |
 | `USE_AI_ANALYSIS` | 에러 분석에 `agy` 사용. `false`면 키워드 코드 검색만 합니다 (`true`) |
-| `AI_MODEL` | `agy` 모델 (`gemini-4-argon-medium`) |
+| `AI_MODEL` | `agy` 모델 (`gemini-4-neon-medium`) |
 | `AI_EFFORT` | `agy` 추론 강도, `low`·`medium`·`high`·`xhigh`·`max` 중 하나 (`medium`) |
 | `AI_ANALYSIS_TIMEOUT_MS` | 에러 분석·요약 제한 시간. 0은 무제한 (`0`) |
 | `AGY_PATH` | `agy` 실행 파일 경로 (`~/.local/bin/agy`) |
