@@ -39,11 +39,14 @@ flowchart TD
 
     P -->|비밀값 · 개인 파일| X[🚫 거절<br/>에이전트 호출 안 함]
     P -->|환경 미지정| DEV[🛠️ dev<br/>조회 · 데이터 보정 · PR]
-    P -->|운영 · prod 명시| PROD[🔒 prod<br/>조회 전용 스킬]
+    P -->|운영 명시 · 조회| PROD[🔒 prod 조회<br/>READ ONLY 트랜잭션 조회 도구]
+    P -->|운영 명시 · 변경 · 팀원| DENY[🚫 거절<br/>에이전트 호출 안 함]
+    P -->|운영 명시 · 변경 · 서버 담당자| PRODW[🔐 prod 변경<br/>ENABLE_PROD_WRITES일 때만]
     P -->|Grafana 알럿| ALERT[🔒 prod 읽기 전용<br/>지표 · 로그 · 코드]
 
     DEV --> ENV[허용한 환경변수만 전달<br/>TOKEN · SECRET · API_KEY 제외]
     PROD --> ENV
+    PRODW --> ENV
     ALERT --> ENV
 
     ENV --> Q[작업 큐<br/>한 번에 1건]
@@ -59,7 +62,10 @@ flowchart TD
 
 **환경 분리**
 - 환경을 적지 않으면 dev로 처리합니다.
-- 운영(prod)은 요청에 `운영`·`prod`·`prd`를 적었을 때만, **조회 전용** 스킬로 접근합니다. 데이터 변경 절차는 dev용만 둡니다.
+- 운영(prod)은 요청에 `운영`·`prod`·`prd`를 적었을 때만 접근합니다.
+- **요청자별 권한** (`src/prod-access.js`): 운영 조회는 누구나 요청할 수 있습니다. 운영 데이터 변경은 `SERVER_OWNER_SLACK_USER_IDS`에 있는 서버 담당자만 요청할 수 있고, `ENABLE_PROD_WRITES=true`일 때만 열립니다. 그 밖의 운영 변경 요청은 에이전트를 부르기 전에 코드에서 거절합니다.
+- **운영 DB 조회** (`scripts/prod-query.js`): SELECT·WITH·SHOW·DESCRIBE·EXPLAIN 한 문장만 받고, `START TRANSACTION READ ONLY` 안에서 실행한 뒤 항상 `ROLLBACK`합니다. 1차 검사를 통과한 쓰기가 있어도 DB가 거부합니다. 개인정보로 보이는 컬럼 값은 `***`로 가립니다.
+- 에이전트에게는 운영 DB를 이 도구로만 읽으라고 지시합니다. 에이전트가 샌드박스 없이 돌기 때문에, 이 도구를 거치지 않는 접근까지 운영체제 수준에서 막지는 못합니다.
 - 예외는 Grafana 알럿 분석입니다. 알럿은 항상 운영에서 오므로 환경을 적지 않아도 prod를 봅니다. 대신 지침에서 읽기만 허용하고 데이터 변경, 재시작, 배포, 알럿 설정 변경, 코드 수정을 금지합니다. 답변에는 회원·그룹 ID, SQL, 서버 주소를 쓰지 않습니다.
 
 **에이전트에 넘기는 것**

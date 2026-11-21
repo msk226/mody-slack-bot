@@ -77,6 +77,9 @@ Slack에서 `@Mody Signal 상태 알려줘`로 실행 중인 작업과 대기 �
 | `PROCESS_EXISTING_MESSAGES` | 봇 시작 전 메시지도 처리 (`false`) |
 | `SLACK_BOT_USER_ID`, `SLACK_BOT_ID` | 비우면 시작할 때 Slack에서 조회합니다 |
 | `ENABLE_PRIVILEGED_OPERATIONS` | 현재 코드에서 읽지 않습니다. 값과 관계없이 멘션 작업은 [권한과 안전장치](../README.md#권한과-안전장치)의 방식으로 실행됩니다 (`true`) |
+| `SERVER_OWNER_SLACK_USER_IDS` | 운영 데이터 변경을 요청할 수 있는 서버 담당자의 Slack 사용자 ID, 쉼표로 구분. 비우면 아무도 운영 데이터를 바꿀 수 없습니다 (기본 빈 값) |
+| `ENABLE_PROD_WRITES` | `true`일 때만 서버 담당자의 운영 데이터 변경을 허용합니다 (`false`) |
+| `MODY_SSH_HOST` · `MODY_DB_CONTAINER` | 운영 DB 조회 도구가 쓰는 SSH 별칭과 MySQL 컨테이너 (`mody-prod` · `mody-mysql`) |
 
 파일 위치는 `AGENT_PROMPT_PATH`, `AGENT_RESULT_SCHEMA_PATH`, `ERROR_ISSUE_CACHE_FILE`, `DAILY_REPORT_STATE_FILE`, `DAILY_INSIGHT_STATE_FILE`, `HANDLED_ALERT_DIRECTORY`, `AGENT_OUTPUT_DIRECTORY`, `AUDIT_DIRECTORY`로 바꿀 수 있습니다. 기본값은 `prompts/`, `config/`, `logs/` 아래입니다.
 

@@ -32,8 +32,16 @@ import {
   isVersionQuestion,
   stripSlackMentions,
 } from './request-policy.js';
+import {
+  buildProdAccessInstructions,
+  decideProdAccess,
+  parseOwnerIds,
+  renderProdDenyReply,
+} from './prod-access.js';
 
 const execFileAsync = promisify(execFile);
+const BOT_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+const PROD_QUERY_COMMAND = `node ${path.join(BOT_ROOT, 'scripts', 'prod-query.js')}`;
 const MODY_SKILLS = ['mody-operations', 'mody-dev-operations'];
 
 process.on('unhandledRejection', (reason) => {
@@ -71,6 +79,8 @@ const config = {
   skillsPath: process.env.MODY_SKILLS_PATH ?? path.join(os.homedir(), '.codex', 'skills'),
   processExistingMessages: process.env.PROCESS_EXISTING_MESSAGES === 'true',
   enablePrivilegedOperations: process.env.ENABLE_PRIVILEGED_OPERATIONS !== 'false',
+  serverOwnerIds: parseOwnerIds(process.env.SERVER_OWNER_SLACK_USER_IDS),
+  enableProdWrites: process.env.ENABLE_PROD_WRITES === 'true',
   pollIntervalMs: Number(process.env.SLACK_POLL_INTERVAL_MS ?? 60_000),
   slackWatchdogMs: Number(process.env.SLACK_WATCHDOG_MS ?? 120000),
   agentConcurrency: Number(process.env.AGENT_CONCURRENCY ?? 1),
@@ -451,6 +461,28 @@ async function handleAgentRequest(client, event, text) {
   await setStatusReaction(client, event, 'received');
   const progress = createProgressUpdater(client, progressMessage);
   const requestedEnvironment = inferEnvironment(text);
+  const prodAccess = decideProdAccess({
+    environment: requestedEnvironment,
+    text,
+    userId: event.user,
+    ownerIds: config.serverOwnerIds,
+    prodWritesEnabled: config.enableProdWrites,
+  });
+  if (prodAccess.mode === 'deny') {
+    // 에이전트를 부르기 전에 막는다. 지침이 아니라 코드에서 거절한다.
+    await auditLog.record({
+      requestId,
+      type: 'agent_request',
+      status: 'denied',
+      environment: requestedEnvironment,
+      slackChannel: event.channel,
+      slackUser: event.user,
+      errorCode: prodAccess.reason,
+    });
+    await updateMessage(client, progressMessage, renderProdDenyReply(prodAccess.reason, requestId));
+    await setStatusReaction(client, event, 'failed');
+    return;
+  }
   // 결과 파일은 첨부한 뒤 지운다. 개인 식별자가 담길 수 있어 디스크에 남기지 않는다.
   let outputDir = '';
 
@@ -477,13 +509,14 @@ async function handleAgentRequest(client, event, text) {
         agentInstructions,
         requestId,
         requestedEnvironment,
+        prodAccessMode: prodAccess.mode,
         text,
         threadContext,
         outputDir,
       });
       const rawResult = await runAgentOperation(prompt, {
         outputSchemaPath: config.agentResultSchemaPath,
-        addDirs: [outputDir],
+        addDirs: prodAccess.mode === 'default' ? [outputDir] : [outputDir, path.join(BOT_ROOT, 'scripts')],
       });
       if (!rawResult) {
         throw new Error('empty_agent_result');
@@ -570,7 +603,7 @@ function startAgentProgressHeartbeat(progress, requestId, startedAt) {
   }, 30_000);
 }
 
-function buildAgentPrompt({ agentInstructions, requestId, requestedEnvironment, text, threadContext, outputDir }) {
+function buildAgentPrompt({ agentInstructions, requestId, requestedEnvironment, prodAccessMode = 'default', text, threadContext, outputDir }) {
   return [
     agentInstructions,
     '',
@@ -578,6 +611,7 @@ function buildAgentPrompt({ agentInstructions, requestId, requestedEnvironment, 
     `- 확인 ID: ${requestId}`,
     `- MODY 저장소: ${config.repoPath}`,
     `- 요청에 명시된 환경: ${requestedEnvironment}`,
+    ...buildProdAccessInstructions(prodAccessMode, { queryCommand: PROD_QUERY_COMMAND }),
     `- 조회 스킬: ${skillReference('mody-operations')}`,
     `- dev 변경 스킬: ${skillReference('mody-dev-operations')}`,
     `- 결과 파일 폴더: ${outputDir} (긴 목록·표는 여기에 CSV나 TXT로 저장한다. 봇이 스레드에 첨부한다. 본문에는 건수와 파일 이름만 쓴다)`,
