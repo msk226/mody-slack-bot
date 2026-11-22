@@ -19,6 +19,10 @@ export class AuditLog {
       slackUser: event.slackUser,
       durationMs: event.durationMs,
       errorCode: event.errorCode,
+      // 의도 라우팅 기록 (type: intent_route)
+      confidence: event.confidence,
+      fallback: event.fallback,
+      proposed: event.proposed,
     };
     await appendFile(this.file, `${JSON.stringify(safeEvent)}\n`, { mode: 0o600 });
   }

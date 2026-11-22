@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "start": "node src/index.js",
-    "check": "node --check src/index.js && node --check src/job-queue.js && node --check src/agent-contract.js && node --check src/request-policy.js && node --check src/daily-insight.js && node --check src/agent-cli.js && node --check src/attachments.js && node --check src/grafana-alert.js && node --check src/prod-access.js && node --check src/prod-db/guard.js && node --check src/prod-db/runner.js && node --check scripts/prod-query.js",
+    "check": "node --check src/index.js && node --check src/job-queue.js && node --check src/agent-contract.js && node --check src/request-policy.js && node --check src/daily-insight.js && node --check src/agent-cli.js && node --check src/attachments.js && node --check src/grafana-alert.js && node --check src/prod-access.js && node --check src/intent-router.js && node --check src/prod-db/guard.js && node --check src/prod-db/runner.js && node --check scripts/prod-query.js",
     "test": "node --test"
   },
   "dependencies": {
