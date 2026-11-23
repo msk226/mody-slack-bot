@@ -7,6 +7,7 @@ export function buildAgyArgs({
   timeoutMs = 0,
   schemaPath = '',
   addDirs = [],
+  settings = '',
 }) {
   const args = [
     '--output-format', 'json',
@@ -23,6 +24,10 @@ export function buildAgyArgs({
   }
   if (schemaPath) {
     args.push('--json-schema', schemaPath);
+  }
+  if (settings) {
+    // 이번 실행에만 쓰는 설정. 의도별 금지 명령(permissions.deny)을 넘긴다.
+    args.push('--settings', settings);
   }
   for (const dir of addDirs) {
     args.push('--add-dir', dir);

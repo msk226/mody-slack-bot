@@ -38,10 +38,19 @@ import {
   parseOwnerIds,
   renderProdDenyReply,
 } from './prod-access.js';
+import {
+  DEFAULT_MIN_CONFIDENCE,
+  buildRouterPrompt,
+  buildScopeInstructions,
+  buildScopeSettings,
+  parseRouterResult,
+  scopeFor,
+} from './intent-router.js';
 
 const execFileAsync = promisify(execFile);
 const BOT_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const PROD_QUERY_COMMAND = `node ${path.join(BOT_ROOT, 'scripts', 'prod-query.js')}`;
+
 const MODY_SKILLS = ['mody-operations', 'mody-dev-operations'];
 
 process.on('unhandledRejection', (reason) => {
@@ -97,6 +106,12 @@ const config = {
     ?? path.join(process.cwd(), 'logs', 'outputs'),
   auditDirectory: process.env.AUDIT_DIRECTORY
     ?? path.join(process.cwd(), 'logs', 'audit'),
+  enableIntentRouting: process.env.ENABLE_INTENT_ROUTING === 'true',
+  intentRouterModel: process.env.INTENT_ROUTER_MODEL ?? 'gemini-3.8-flash-low',
+  intentRouterTimeoutMs: Number(process.env.INTENT_ROUTER_TIMEOUT_MS ?? 60_000),
+  intentRouterMinConfidence: Number(process.env.INTENT_ROUTER_MIN_CONFIDENCE ?? DEFAULT_MIN_CONFIDENCE),
+  intentRouterSchemaPath: process.env.INTENT_ROUTER_SCHEMA_PATH
+    ?? path.join(process.cwd(), 'config', 'intent-router.schema.json'),
 };
 
 const repoLinkPattern = new RegExp(`\\[([^\\]]+)]\\((?:${escapeRegExp(config.repoPath)}/)?([^)]+)\\)`, 'g');
@@ -503,6 +518,20 @@ async function handleAgentRequest(client, event, text) {
       await progress(':loading: 작업을 시작했습니다. 요청과 이전 대화를 확인하고 있습니다.', { force: true });
       progressHeartbeat = startAgentProgressHeartbeat(progress, requestId, startedAt);
       const threadContext = await buildThreadContext(client, event, progress);
+      const route = config.enableIntentRouting
+        ? await classifyIntent({ text, threadContext })
+        : { intent: 'general', confidence: 0, fallback: 'disabled' };
+      await auditLog.record({
+        requestId,
+        type: 'intent_route',
+        status: route.intent,
+        confidence: route.confidence,
+        fallback: route.fallback,
+        proposed: route.proposed,
+        durationMs: route.durationMs,
+        slackChannel: event.channel,
+        slackUser: event.user,
+      });
       const agentInstructions = await readFile(config.agentPromptPath, 'utf8');
       outputDir = await createOutputDirectory(config.agentOutputDirectory, requestId);
       const prompt = buildAgentPrompt({
@@ -510,6 +539,7 @@ async function handleAgentRequest(client, event, text) {
         requestId,
         requestedEnvironment,
         prodAccessMode: prodAccess.mode,
+        intent: route.intent,
         text,
         threadContext,
         outputDir,
@@ -517,6 +547,8 @@ async function handleAgentRequest(client, event, text) {
       const rawResult = await runAgentOperation(prompt, {
         outputSchemaPath: config.agentResultSchemaPath,
         addDirs: prodAccess.mode === 'default' ? [outputDir] : [outputDir, path.join(BOT_ROOT, 'scripts')],
+        skills: scopeFor(route.intent).skills,
+        settings: buildScopeSettings(route.intent),
       });
       if (!rawResult) {
         throw new Error('empty_agent_result');
@@ -603,7 +635,8 @@ function startAgentProgressHeartbeat(progress, requestId, startedAt) {
   }, 30_000);
 }
 
-function buildAgentPrompt({ agentInstructions, requestId, requestedEnvironment, prodAccessMode = 'default', text, threadContext, outputDir }) {
+function buildAgentPrompt({ agentInstructions, requestId, requestedEnvironment, prodAccessMode = 'default', intent = 'general', text, threadContext, outputDir }) {
+  const skills = scopeFor(intent).skills;
   return [
     agentInstructions,
     '',
@@ -612,8 +645,11 @@ function buildAgentPrompt({ agentInstructions, requestId, requestedEnvironment, 
     `- MODY 저장소: ${config.repoPath}`,
     `- 요청에 명시된 환경: ${requestedEnvironment}`,
     ...buildProdAccessInstructions(prodAccessMode, { queryCommand: PROD_QUERY_COMMAND }),
+    ...buildScopeInstructions(intent),
     `- 조회 스킬: ${skillReference('mody-operations')}`,
-    `- dev 변경 스킬: ${skillReference('mody-dev-operations')}`,
+    ...(skills.includes('mody-dev-operations')
+      ? [`- dev 변경 스킬: ${skillReference('mody-dev-operations')}`]
+      : ['- dev 변경 스킬: 이번 요청에서는 쓰지 않는다']),
     `- 결과 파일 폴더: ${outputDir} (긴 목록·표는 여기에 CSV나 TXT로 저장한다. 봇이 스레드에 첨부한다. 본문에는 건수와 파일 이름만 쓴다)`,
     '',
     '<slack_request>',
@@ -1201,18 +1237,47 @@ async function runAgentOperation(prompt, options = {}) {
     timeoutMs: config.agentTimeoutMs,
     schemaPath: options.outputSchemaPath,
     addDirs: options.addDirs,
+    skills: options.skills,
+    settings: options.settings,
     label: 'operation',
   });
 }
 
-async function runAgent(prompt, { timeoutMs = 0, schemaPath = '', addDirs = [], label = 'agent' } = {}) {
+// 요청 의도 분류. 실패하면 general(기존 동작)로 보낸다.
+async function classifyIntent({ text, threadContext }) {
+  const startedAt = Date.now();
+  const raw = await runAgent(buildRouterPrompt({ text, threadContext }), {
+    model: config.intentRouterModel,
+    effort: 'low',
+    timeoutMs: config.intentRouterTimeoutMs,
+    schemaPath: config.intentRouterSchemaPath,
+    skills: [],
+    label: 'intent-router',
+  });
+  const route = raw
+    ? parseRouterResult(raw, { minConfidence: config.intentRouterMinConfidence })
+    : { intent: 'general', confidence: 0, fallback: 'router_failed' };
+  return { ...route, durationMs: Date.now() - startedAt };
+}
+
+async function runAgent(prompt, {
+  timeoutMs = 0,
+  schemaPath = '',
+  addDirs = [],
+  skills = MODY_SKILLS,
+  settings = '',
+  model = config.aiModel,
+  effort = config.aiEffort,
+  label = 'agent',
+} = {}) {
   const args = buildAgyArgs({
     prompt,
-    model: config.aiModel,
-    effort: config.aiEffort,
+    model,
+    effort,
     timeoutMs,
     schemaPath,
-    addDirs: [...MODY_SKILLS.map((name) => path.join(config.skillsPath, name)), ...addDirs],
+    settings,
+    addDirs: [...skills.map((name) => path.join(config.skillsPath, name)), ...addDirs],
   });
   const result = await runCommand(config.agyPath, args, {
     // agy가 --print-timeout으로 먼저 멈추도록 프로세스 강제 종료는 30초 늦춘다. 0은 무제한.
