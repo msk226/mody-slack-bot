@@ -5,21 +5,24 @@ const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
 const DAY_SECONDS = 24 * 60 * 60;
 
 export const INSIGHT_TITLE = '데일리 인사이트';
+export const WEEKLY_INSIGHT_TITLE = '주간 인사이트';
 
 // daily_report.py의 report_text. 예전 리포트는 '데일리', 지금은 '일일'로 올라온다.
 const REPORT_TEXT = /^MODY (?:일일|데일리) 리포트 (\d{4}-\d{2}-\d{2})/;
+// weekly_report.py의 report_text. 날짜는 집계한 주의 월요일이다.
+export const WEEKLY_REPORT_TEXT = /^MODY 주간 리포트 (\d{4}-\d{2}-\d{2})/;
 const TREND_EMOJI = { 'mody-up': '▲', 'mody-down': '▼', 'mody-flat': '–' };
 
-export function reportDateOf(message) {
+export function reportDateOf(message, pattern = REPORT_TEXT) {
   if (!message?.bot_id) return null;
-  return message.text?.match(REPORT_TEXT)?.[1] ?? null;
+  return message.text?.match(pattern)?.[1] ?? null;
 }
 
 // 같은 날짜 리포트가 여러 번 올라오면(강제 재발송) 가장 최근 메시지를 쓴다.
-export function pickReports(messages = []) {
+export function pickReports(messages = [], pattern = REPORT_TEXT) {
   const byDate = new Map();
   for (const message of messages) {
-    const date = reportDateOf(message);
+    const date = reportDateOf(message, pattern);
     if (!date) continue;
     const current = byDate.get(date);
     if (!current || Number(message.ts) > Number(current.ts)) {
@@ -83,6 +86,23 @@ export function dueReportDate(nowMs, time, state = {}) {
   return state.lastReportDate === target ? null : target;
 }
 
+// KST 기준 한 주(월요일 date부터 7일)의 시작과 끝(Unix 초).
+export function kstWeekRange(date) {
+  const { start } = kstDayRange(date);
+  return { start, end: start + 7 * DAY_SECONDS };
+}
+
+// 지금 분석할 주간 리포트의 주(월요일 날짜). 월요일 리포트 시각이 지나면 지난주를 본다.
+// 맥이 월요일에 꺼져 있었으면 그 주 안에 켜졌을 때 지난주 리포트를 분석한다.
+export function dueWeeklyReportDate(nowMs, time, state = {}) {
+  const [hour, minute] = time.split(':').map(Number);
+  const nowKst = new Date(nowMs + KST_OFFSET_MS);
+  const sinceMonday = (nowKst.getUTCDay() + 6) % 7;
+  if (sinceMonday === 0 && nowKst.getUTCHours() * 60 + nowKst.getUTCMinutes() < hour * 60 + minute) return null;
+  const target = addDays(nowKst.toISOString().slice(0, 10), -sinceMonday - 7);
+  return state.lastReportDate === target ? null : target;
+}
+
 export function summarizeErrorAlerts(messages, { parseServerError, isIgnoredNoise, alertEnvironment }) {
   const counts = new Map();
   const byEnvironment = new Map();
@@ -138,6 +158,47 @@ export function buildInsightPrompt({ report, previous, errors }) {
   ].join('\n');
 }
 
+export function buildWeeklyInsightPrompt({ report, previous, errors }) {
+  return [
+    '너는 MODY 팀의 데이터 분석 보조다. 아래 주간 리포트를 읽고 PM·디자이너가 다음 기획 방향을 잡는 데 도움이 될 인사이트를 Slack thread 댓글로 쓴다.',
+    '',
+    '규칙',
+    '- 아래 제공된 숫자만 근거로 쓴다. 없는 숫자를 만들지 않는다.',
+    '- "5명 미만"으로 가려진 칸은 다른 숫자로 거꾸로 계산하거나 추정하지 않는다.',
+    '- 평소와 다른 변화만 고른다. 리포트의 전주 대비와 이전 주간 리포트들을 함께 본다.',
+    `- 비교할 이전 주간 리포트는 ${previous.length}개다. 3개 미만이면 비교가 제한적이라고 한 줄로 밝힌다.`,
+    '- 몇 건·몇 명 수준의 작은 변화에는 의미를 부여하지 않는다.',
+    '- 원인은 단정하지 않는다. 같은 주 에러 기록과 시기가 겹칠 때만 가능성으로 적는다.',
+    '- 지표 정의가 필요하면 scripts/daily-report/weekly_report.py를 읽는다. 코드·DB·서버는 수정하거나 조회하지 않는다.',
+    '- 코드, SQL, 파일 경로, 서버 정보는 쓰지 않는다. 비개발자도 이해할 수 있게 쓴다.',
+    '',
+    '형식 (700자 이내, 제목 없이 본문만)',
+    '- 문단으로 쓰지 않는다. 모든 줄을 "• "로 시작하는 짧은 한 문장으로 쓴다.',
+    '- 눈에 띄는 변화 2~3줄: 지표와 숫자, 평소와 무엇이 다른지',
+    '- 원인 후보 1줄: 근거가 있을 때만, 가능성으로',
+    '- 마지막 줄은 "• 다음 주에 확인해 볼 것: "으로 시작해 한 가지만 쓴다.',
+    '- 특이사항이 없으면 "특이사항 없음"과 이유 한 줄, 그리고 다음 주에 확인해 볼 것 한 줄만 쓴다.',
+    '',
+    `[${report.date} 주간 리포트]`,
+    report.text,
+    '',
+    '[이전 주간 리포트]',
+    previous.length > 0 ? previous.map((item) => `(${item.date} 주)\n${item.text}`).join('\n\n') : '없음',
+    '',
+    `[${report.date}부터 7일간 서버 에러 알림]`,
+    errors,
+  ].join('\n');
+}
+
+// 주간 리포트용 설정. createDailyInsightRunner/startDailyInsight에 펼쳐서 넘긴다.
+export const WEEKLY_INSIGHT = {
+  pattern: WEEKLY_REPORT_TEXT,
+  title: WEEKLY_INSIGHT_TITLE,
+  buildPrompt: buildWeeklyInsightPrompt,
+  errorRange: kstWeekRange,
+  lookback: 4,
+};
+
 export function createDailyInsightRunner({
   client,
   botId,
@@ -150,9 +211,13 @@ export function createDailyInsightRunner({
   post,
   format = (text) => text,
   lookback = 7,
+  pattern = REPORT_TEXT,
+  title = INSIGHT_TITLE,
+  buildPrompt = buildInsightPrompt,
+  errorRange = kstDayRange,
 }) {
   async function loadErrors(date) {
-    const { start, end } = kstDayRange(date);
+    const { start, end } = errorRange(date);
     const messages = [];
     let cursor;
     do {
@@ -166,13 +231,13 @@ export function createDailyInsightRunner({
       });
       messages.push(...(response.messages ?? []));
       cursor = response.response_metadata?.next_cursor || undefined;
-    } while (cursor && messages.length < 1000);
+    } while (cursor && messages.length < 2000);
     return summarizeErrorAlerts(messages, { parseServerError, isIgnoredNoise, alertEnvironment });
   }
 
   return async function runFor(date, { dryRun = false } = {}) {
     const history = await client.conversations.history({ channel: reportChannelId, limit: 100 });
-    const reports = pickReports(history.messages ?? []);
+    const reports = pickReports(history.messages ?? [], pattern);
     const report = reports.find((item) => item.date === date);
     if (!report) return { status: 'not_found' };
 
@@ -180,17 +245,17 @@ export function createDailyInsightRunner({
       const replies = await client.conversations.replies({ channel: reportChannelId, ts: report.ts, limit: 100 });
       const posted = (replies.messages ?? []).some((message) => message.ts !== report.ts
         && message.bot_id === botId
-        && message.text?.includes(INSIGHT_TITLE));
+        && message.text?.includes(title));
       if (posted) return { status: 'already_posted' };
     }
 
     const previous = reports.filter((item) => item.date < date).slice(0, lookback);
     const errors = await loadErrors(date);
-    const prompt = buildInsightPrompt({ report, previous, errors });
+    const prompt = buildPrompt({ report, previous, errors });
     const analysis = await analyze(prompt);
     if (!analysis) throw new Error('insight_analysis_failed');
 
-    const text = `*${INSIGHT_TITLE}*\n${format(analysis)}`;
+    const text = `*${title}*\n${format(analysis)}`;
     if (dryRun) return { status: 'dry_run', text, prompt };
     await post(reportChannelId, report.ts, text);
     return { status: 'posted', text };
@@ -199,14 +264,16 @@ export function createDailyInsightRunner({
 
 // 리포트 시각 이후 5분마다 확인하고, 어제 날짜 리포트가 올라와 있으면 한 번 분석한다.
 // 실패하면 30분 뒤 다시 시도하고, 같은 날짜는 3번까지만 시도한다.
-export function startDailyInsight({ time, stateFile, runFor, checkIntervalMs = 5 * 60_000 }) {
+export function startDailyInsight({
+  time, stateFile, runFor, checkIntervalMs = 5 * 60_000, due = dueReportDate, label = 'daily-insight',
+}) {
   let running = false;
   let lastFailureAt = 0;
   const failures = new Map();
 
   const tick = async () => {
     if (running) return;
-    const date = dueReportDate(Date.now(), time, await readState(stateFile));
+    const date = due(Date.now(), time, await readState(stateFile));
     if (!date || (failures.get(date) ?? 0) >= 3) return;
     if (Date.now() - lastFailureAt < 30 * 60_000) return;
 
@@ -215,12 +282,12 @@ export function startDailyInsight({ time, stateFile, runFor, checkIntervalMs = 5
       const result = await runFor(date);
       if (result.status === 'posted' || result.status === 'already_posted') {
         await writeState(stateFile, { lastReportDate: date, status: result.status, at: new Date().toISOString() });
-        console.log(`[daily-insight] ${result.status} for ${date}`);
+        console.log(`[${label}] ${result.status} for ${date}`);
       }
     } catch (error) {
       lastFailureAt = Date.now();
       failures.set(date, (failures.get(date) ?? 0) + 1);
-      console.error(`[daily-insight] failed for ${date}:`, error?.data?.error ?? error?.message ?? error);
+      console.error(`[${label}] failed for ${date}:`, error?.data?.error ?? error?.message ?? error);
     } finally {
       running = false;
     }

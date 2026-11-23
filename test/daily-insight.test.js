@@ -2,9 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   INSIGHT_TITLE,
+  WEEKLY_INSIGHT,
+  WEEKLY_INSIGHT_TITLE,
   addDays,
   createDailyInsightRunner,
   dueReportDate,
+  dueWeeklyReportDate,
+  kstWeekRange,
   flattenReportBlocks,
   kstDayRange,
   pickReports,
@@ -183,4 +187,47 @@ test('fails when the analysis returns nothing so the scheduler can retry', async
   const client = fakeClient({ reports: [report], replies: [report] });
   const runFor = createDailyInsightRunner(runnerDeps(client, { analyze: async () => null }));
   await assert.rejects(runFor('2026-10-10'), /insight_analysis_failed/);
+});
+
+const weeklyReport = { ts: '400.0', bot_id: 'BBOT', text: 'MODY 주간 리포트 2026-11-16', blocks: reportBlocks };
+
+test('weekly insight picks only weekly reports and is due after Monday report time', () => {
+  const reports = pickReports([weeklyReport, report], WEEKLY_INSIGHT.pattern);
+  assert.deepEqual(reports.map((item) => item.date), ['2026-11-16']);
+  assert.deepEqual(pickReports([weeklyReport]).map((item) => item.date), []);
+
+  // 2026-11-23은 월요일
+  assert.equal(dueWeeklyReportDate(Date.parse('2026-11-23T09:59:00+09:00'), '10:00'), null);
+  assert.equal(dueWeeklyReportDate(Date.parse('2026-11-23T10:05:00+09:00'), '10:00'), '2026-11-16');
+  assert.equal(dueWeeklyReportDate(Date.parse('2026-11-25T08:00:00+09:00'), '10:00'), '2026-11-16');
+  assert.equal(dueWeeklyReportDate(Date.parse('2026-11-29T23:59:00+09:00'), '10:00'), '2026-11-16');
+  assert.equal(dueWeeklyReportDate(Date.parse('2026-11-23T10:05:00+09:00'), '10:00', { lastReportDate: '2026-11-16' }), null);
+
+  const range = kstWeekRange('2026-11-16');
+  assert.equal(range.start, Date.parse('2026-11-16T00:00:00+09:00') / 1000);
+  assert.equal(range.end, Date.parse('2026-11-23T00:00:00+09:00') / 1000);
+});
+
+test('weekly insight uses the weekly prompt, week-long errors and its own title', async () => {
+  let prompt = '';
+  let errorRange = null;
+  const posts = [];
+  const client = fakeClient({ reports: [weeklyReport, report], replies: [weeklyReport] });
+  client.conversations.history = async ({ channel, oldest, latest }) => {
+    if (channel === 'CERR') errorRange = [Number(oldest), Number(latest)];
+    return { messages: channel === 'CREPORT' ? [weeklyReport, report] : [] };
+  };
+  const runFor = createDailyInsightRunner(runnerDeps(client, {
+    ...WEEKLY_INSIGHT,
+    analyze: async (value) => { prompt = value; return '• 식사 기록 증가\n• 다음 주에 확인해 볼 것: 댓글'; },
+    post: async (...args) => { posts.push(args); },
+  }));
+
+  assert.equal((await runFor('2026-11-16')).status, 'posted');
+  assert.match(prompt, /\[2026-11-16 주간 리포트\]/);
+  assert.match(prompt, /다음 주에 확인해 볼 것/);
+  assert.match(prompt, /5명 미만/);
+  assert.deepEqual(errorRange, [kstWeekRange('2026-11-16').start, kstWeekRange('2026-11-16').end]);
+  assert.equal(posts[0][1], '400.0');
+  assert.match(posts[0][2], new RegExp(`^\\*${WEEKLY_INSIGHT_TITLE}\\*`));
 });

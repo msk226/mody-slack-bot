@@ -160,8 +160,8 @@ src/
   agent-contract.js        환경 추론, 결과 JSON 파싱, Slack 답변 형식
   job-queue.js             동시 실행 수를 제한하는 작업 큐
   github-issue.js          에러별 GitHub 이슈 생성·재사용
-  daily-report-trigger.js  일일 리포트 워크플로 실행
-  daily-insight.js         일일 리포트 인사이트
+  daily-report-trigger.js  일일·주간(월 10:00) 리포트 워크플로 실행
+  daily-insight.js         일일·주간 리포트 인사이트
   grafana-alert.js         Grafana 알럿 파싱, 분석 지침, 결과 형식
   attachments.js           긴 결과 파일 첨부
   audit-log.js             감사 기록
