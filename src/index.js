@@ -22,7 +22,9 @@ import {
 import { alertEnvironment, markAlertEnvironment, setStatusReaction, slackMessage, stripStatusEmoji } from './slack-status.js';
 import { ensureErrorIssue } from './github-issue.js';
 import { startDailyReportTrigger } from './daily-report-trigger.js';
-import { createDailyInsightRunner, startDailyInsight } from './daily-insight.js';
+import {
+  WEEKLY_INSIGHT, createDailyInsightRunner, dueWeeklyReportDate, startDailyInsight,
+} from './daily-insight.js';
 import {
   buildSafeChildEnvironment,
   findPreviousUserRequest,
@@ -80,6 +82,12 @@ const config = {
   dailyInsightEnabled: process.env.DAILY_INSIGHT_ENABLED !== 'false' && Boolean(process.env.DAILY_REPORT_CHANNEL_ID),
   dailyReportChannelId: process.env.DAILY_REPORT_CHANNEL_ID ?? '',
   dailyInsightStateFile: process.env.DAILY_INSIGHT_STATE_FILE ?? path.join(process.cwd(), 'logs', 'daily-insight.json'),
+  // 주간 리포트: 매주 월요일 이 시각(KST)에 지난주 리포트를 트리거하고 인사이트를 단다
+  weeklyReportTriggerEnabled: process.env.WEEKLY_REPORT_TRIGGER_ENABLED !== 'false',
+  weeklyReportTime: process.env.WEEKLY_REPORT_TIME ?? '10:00',
+  weeklyReportStateFile: process.env.WEEKLY_REPORT_STATE_FILE ?? path.join(process.cwd(), 'logs', 'weekly-report-trigger.json'),
+  weeklyInsightEnabled: process.env.WEEKLY_INSIGHT_ENABLED !== 'false' && Boolean(process.env.DAILY_REPORT_CHANNEL_ID),
+  weeklyInsightStateFile: process.env.WEEKLY_INSIGHT_STATE_FILE ?? path.join(process.cwd(), 'logs', 'weekly-insight.json'),
   useAiAnalysis: process.env.USE_AI_ANALYSIS !== 'false',
   agyPath: process.env.AGY_PATH ?? path.join(os.homedir(), '.local', 'bin', 'agy'),
   aiModel: process.env.AI_MODEL ?? 'gemini-4-neon-medium',
@@ -208,6 +216,37 @@ if (config.dailyReportTriggerEnabled) {
     workflow: 'daily-report.yml',
     time: config.dailyReportTime,
     stateFile: config.dailyReportStateFile,
+  });
+}
+if (config.weeklyReportTriggerEnabled) {
+  startDailyReportTrigger({
+    repo: config.githubRepo,
+    ghPath: config.ghPath,
+    workflow: 'weekly-report.yml',
+    time: config.weeklyReportTime,
+    stateFile: config.weeklyReportStateFile,
+    weekly: true,
+  });
+}
+if (config.weeklyInsightEnabled) {
+  startDailyInsight({
+    time: config.weeklyReportTime,
+    stateFile: config.weeklyInsightStateFile,
+    due: dueWeeklyReportDate,
+    label: 'weekly-insight',
+    runFor: createDailyInsightRunner({
+      ...WEEKLY_INSIGHT,
+      client: app.client,
+      botId,
+      reportChannelId: config.dailyReportChannelId,
+      errorChannelId: config.errorChannelId,
+      parseServerError,
+      isIgnoredNoise,
+      alertEnvironment,
+      analyze: (prompt) => runAgentAnalysis(prompt, null),
+      post: (channel, threadTs, text) => upsertThreadReply(app.client, { channel, ts: threadTs }, text),
+      format: formatForSlack,
+    }),
   });
 }
 if (config.dailyInsightEnabled) {
