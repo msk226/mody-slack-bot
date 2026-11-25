@@ -6,45 +6,107 @@
     "title",
     "content",
     "targetType",
+    "groupId",
+    "memberIds",
     "scheduledAtKst",
+    "allowQuietHours",
     "deepLink",
     "copyChecks",
     "assumptions",
     "needsClarification"
   ],
   "properties": {
-    "title": { "type": "string", "minLength": 1, "maxLength": 100 },
-    "content": { "type": "string", "minLength": 1, "maxLength": 500 },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 50
+    },
+    "content": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
     "targetType": {
       "type": "string",
-      "enum": ["ALL", "ACTIVE_7D", "ACTIVE_30D", "SPECIFIC_MEMBERS"]
+      "enum": [
+        "ALL",
+        "GROUP",
+        "MEMBERS"
+      ],
+      "description": "mody-server 공지 API 대상과 같다. ALL=활성 회원 전체, GROUP=그룹 참여 회원, MEMBERS=회원 ID 최대 100명"
+    },
+    "groupId": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "GROUP 대상일 때 숫자 그룹 ID, 아니면 null"
+    },
+    "memberIds": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "type": "string",
+        "pattern": "^[0-9]+$"
+      },
+      "description": "MEMBERS 대상일 때 회원 ID 목록, 아니면 빈 배열"
     },
     "scheduledAtKst": {
-      "type": ["string", "null"],
-      "description": "ISO-8601 KST timestamp e.g. 2026-11-25T19:00:00+09:00, or null if unspecified"
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "ISO-8601 KST 시각(예: 2026-11-25T19:00:00+09:00). 콘솔에는 예약 발송이 없어 이 시각에 사람이 직접 보낸다. 없으면 null(바로 발송)"
+    },
+    "allowQuietHours": {
+      "type": "boolean",
+      "description": "요청에 야간(21~8시 KST) 발송을 명시적으로 허용한다는 말이 있을 때만 true"
     },
     "deepLink": {
-      "type": ["string", "null"],
-      "description": "Internal MODY app route e.g. /home or /records, or null"
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "앱 내부 경로(예: /home, /records/meal) 또는 null. 지금 공지 API는 딥링크를 받지 않는다"
     },
     "copyChecks": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["hasTypo", "hasAdRisk", "mentionsAppUpdate", "notes"],
+      "required": [
+        "hasTypo",
+        "hasAdRisk",
+        "mentionsAppUpdate",
+        "notes"
+      ],
       "properties": {
-        "hasTypo": { "type": "boolean" },
-        "hasAdRisk": { "type": "boolean" },
-        "mentionsAppUpdate": { "type": "boolean" },
-        "notes": { "type": "array", "items": { "type": "string" } }
+        "hasTypo": {
+          "type": "boolean"
+        },
+        "hasAdRisk": {
+          "type": "boolean"
+        },
+        "mentionsAppUpdate": {
+          "type": "boolean"
+        },
+        "notes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
       }
     },
     "assumptions": {
       "type": "array",
-      "items": { "type": "string" }
+      "items": {
+        "type": "string"
+      }
     },
     "needsClarification": {
       "type": "array",
-      "items": { "type": "string" }
+      "items": {
+        "type": "string"
+      }
     }
   }
 }
