@@ -1,25 +1,29 @@
-// Runs SQL on the MySQL container through `ssh <host> docker exec`.
-// The DB password is read from the container's own env inside the container and never leaves the server.
+// Runs SQL on the MySQL container through `ssh <host> docker exec` using the SELECT-only MySQL account.
+// Credentials live in `/var/lib/mysql/.mody-readonly.cnf` (chmod 600) on the server volume and never leave the server.
 
 import { spawn } from 'node:child_process';
 
 const SAFE_NAME = /^[A-Za-z0-9_.@-]+$/;
+const SAFE_PATH = /^\/[A-Za-z0-9_./-]+$/;
 
 export function loadConfig(env = process.env) {
   const config = {
     sshHost: env.MODY_SSH_HOST || 'mody-prod', // ~/.ssh/config alias
     container: env.MODY_DB_CONTAINER || 'mody-mysql',
+    defaultsExtraFile: env.MODY_DB_READONLY_CNF || '/var/lib/mysql/.mody-readonly.cnf',
     timeoutMs: Number(env.MODY_QUERY_TIMEOUT_MS || 30000),
     maxExecutionMs: Number(env.MODY_MAX_EXECUTION_MS || 10000),
   };
   if (!SAFE_NAME.test(config.sshHost)) throw new Error('MODY_SSH_HOST 형식이 올바르지 않습니다.');
   if (!SAFE_NAME.test(config.container)) throw new Error('MODY_DB_CONTAINER 형식이 올바르지 않습니다.');
+  if (!SAFE_PATH.test(config.defaultsExtraFile)) throw new Error('MODY_DB_READONLY_CNF 형식이 올바르지 않습니다.');
   return config;
 }
 
 export function buildRemoteCommand(config) {
+  const cnf = config.defaultsExtraFile || '/var/lib/mysql/.mody-readonly.cnf';
   return `docker exec -i ${config.container} sh -c ` +
-    `'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysql -uroot --batch --raw --default-character-set=utf8mb4 "$MYSQL_DATABASE"'`;
+    `'exec mysql --defaults-extra-file=${cnf} --batch --raw --default-character-set=utf8mb4 "$MYSQL_DATABASE"'`;
 }
 
 export function buildStdin(sql, config) {
