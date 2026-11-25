@@ -79,6 +79,11 @@ Slack에서 `@Mody Signal 상태 알려줘`로 실행 중인 작업과 대기 �
 | `ENABLE_PRIVILEGED_OPERATIONS` | 현재 코드에서 읽지 않습니다. 값과 관계없이 멘션 작업은 [권한과 안전장치](../README.md#권한과-안전장치)의 방식으로 실행됩니다 (`true`) |
 | `SERVER_OWNER_SLACK_USER_IDS` | 운영 데이터 변경을 요청할 수 있는 서버 담당자의 Slack 사용자 ID, 쉼표로 구분. 비우면 아무도 운영 데이터를 바꿀 수 없습니다 (기본 빈 값) |
 | `ENABLE_PROD_WRITES` | `true`일 때만 서버 담당자의 운영 데이터 변경을 허용합니다 (`false`) |
+| `REPORT_ACTIONS_ENABLED` | `true`일 때만 신고 알림의 숨김·기각 버튼을 처리합니다 (`false`) |
+| `REPORT_ACTION_BASE_URL` | 버튼 처리 요청을 보낼 서버 주소. 지금은 dev(`https://dev-mody.store`)만 씁니다 |
+| `REPORT_ACTION_SECRET` | 서버 `ADMIN_SLACK_ACTION_SECRET`과 같은 값. 관리자 API 키와 다른 전용 값입니다 |
+| `REPORT_ACTION_ENVIRONMENT` | `dev` 또는 `prod`. `prod`면 버튼 처리를 거절합니다 (`dev`) |
+| `REPORT_ACTION_CHANNEL_IDS` | 버튼을 처리할 채널 ID, 쉼표로 구분. 비우면 채널을 가리지 않습니다 |
 | `MODY_SSH_HOST` · `MODY_DB_CONTAINER` | 운영 DB 조회 도구가 쓰는 SSH 별칭과 MySQL 컨테이너 (`mody-prod` · `mody-mysql`) |
 
 파일 위치는 `AGENT_PROMPT_PATH`, `AGENT_RESULT_SCHEMA_PATH`, `ERROR_ISSUE_CACHE_FILE`, `DAILY_REPORT_STATE_FILE`, `DAILY_INSIGHT_STATE_FILE`, `HANDLED_ALERT_DIRECTORY`, `AGENT_OUTPUT_DIRECTORY`, `AUDIT_DIRECTORY`로 바꿀 수 있습니다. 기본값은 `prompts/`, `config/`, `logs/` 아래입니다.
