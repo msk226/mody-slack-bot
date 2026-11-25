@@ -20,6 +20,7 @@ AI 에이전트가 팀 서버에 접근하므로, 할 수 있는 일의 범위�
 | 💬 **멘션 작업** | 코드 확인, dev/prod 데이터 조회, dev 데이터 보정, 코드 수정·PR·배포 요청을 처리합니다. |
 | 📝 **thread 요약** | thread 대화를 요약합니다. |
 | 📊 **일일 리포트 인사이트** | 매일 리포트 워크플로를 실행하고, 리포트가 올라오면 지난 리포트·같은 날 500 에러와 함께 읽어 인사이트를 남깁니다. |
+| 🚩 **신고 처리 버튼** | 서버 신고 알림의 숨김·기각 버튼을 받아 처리하고, 메시지를 처리 결과로 바꿉니다 (dev 실험 중). |
 | 🩺 **봇 상태** | 실행 중인 작업과 대기 작업 수를 바로 답합니다. |
 
 ```text
@@ -67,6 +68,12 @@ flowchart TD
 - **운영 DB 조회** (`scripts/prod-query.js`): SELECT·WITH·SHOW·DESCRIBE·EXPLAIN 한 문장만 받고, `START TRANSACTION READ ONLY` 안에서 실행한 뒤 항상 `ROLLBACK`합니다. 1차 검사를 통과한 쓰기가 있어도 DB가 거부합니다. 개인정보로 보이는 컬럼 값은 `***`로 가립니다.
 - 에이전트에게는 운영 DB를 이 도구로만 읽으라고 지시합니다. 에이전트가 샌드박스 없이 돌기 때문에, 이 도구를 거치지 않는 접근까지 운영체제 수준에서 막지는 못합니다.
 - 예외는 Grafana 알럿 분석입니다. 알럿은 항상 운영에서 오므로 환경을 적지 않아도 prod를 봅니다. 대신 지침에서 읽기만 허용하고 데이터 변경, 재시작, 배포, 알럿 설정 변경, 코드 수정을 금지합니다. 답변에는 회원·그룹 ID, SQL, 서버 주소를 쓰지 않습니다.
+
+**신고 처리 버튼** (`src/report-actions.js`, mody-server LLD-0040)
+- 서버가 올린 신고 알림의 숨김·기각 버튼을 받아 서버의 Slack 처리 API만 부릅니다. 에이전트를 부르지 않습니다.
+- 처리 권한은 서버가 정합니다. 버튼을 누른 Slack 사용자에 연결된 관리자 계정이 있고 조회 전용(VIEWER)이 아니어야 하며, 처리자와 작업 이력에 그 계정이 남습니다.
+- 봇은 누른 사람의 Slack ID를 전용 비밀값(`REPORT_ACTION_SECRET`)으로 서명해 보냅니다. 이 값은 이름에 `SECRET`이 들어가 에이전트에 넘어가지 않습니다.
+- 지금은 dev만 처리합니다. 운영 신고는 `ENABLE_PROD_WRITES`·서버 담당자 제한과의 관계를 정하기 전까지 거절합니다.
 
 **에이전트에 넘기는 것**
 - 허용한 환경변수(`HOME`, `PATH`, `SSH_AUTH_SOCK` 등)만 넘깁니다. 이름에 `TOKEN`, `SECRET`, `PASSWORD`, `API_KEY`가 들어간 변수는 넘기지 않습니다.
@@ -164,6 +171,7 @@ src/
   daily-insight.js         일일·주간 리포트 인사이트
   grafana-alert.js         Grafana 알럿 파싱, 분석 지침, 결과 형식
   attachments.js           긴 결과 파일 첨부
+  report-actions.js        신고 알림 숨김·기각 버튼 처리
   audit-log.js             감사 기록
 prompts/mody-agent.md      에이전트 지침
 config/agent-result.schema.json  결과 JSON 스키마

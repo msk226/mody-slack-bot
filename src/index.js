@@ -21,6 +21,7 @@ import {
 } from './grafana-alert.js';
 import { alertEnvironment, markAlertEnvironment, setStatusReaction, slackMessage, stripStatusEmoji } from './slack-status.js';
 import { ensureErrorIssue } from './github-issue.js';
+import { REPORT_ACTION_IDS, handleReportAction, loadReportActionConfig } from './report-actions.js';
 import { startDailyReportTrigger } from './daily-report-trigger.js';
 import {
   WEEKLY_INSIGHT, createDailyInsightRunner, dueWeeklyReportDate, startDailyInsight,
@@ -141,6 +142,19 @@ let botUserId = process.env.SLACK_BOT_USER_ID;
 let botId = process.env.SLACK_BOT_ID;
 let pollInProgress = false;
 let lastSuccessfulPollAt = Date.now();
+
+// 신고 알림의 숨김·기각 버튼 (mody-server LLD-0040). 에이전트를 부르지 않고 서버 API만 부른다.
+const reportActionConfig = loadReportActionConfig(process.env);
+for (const actionId of REPORT_ACTION_IDS) {
+  app.action(actionId, async ({ ack, body, action, respond }) => {
+    await ack();
+    try {
+      await handleReportAction({ body, action, respond, config: reportActionConfig, auditLog });
+    } catch (error) {
+      console.error('report action failed:', error);
+    }
+  });
+}
 
 app.event('message', async ({ event, client }) => {
   if (isOwnBotMessage(event) || isUnsupportedMessage(event)) {
