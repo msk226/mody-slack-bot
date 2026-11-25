@@ -66,9 +66,13 @@ test('batch output is parsed into columns and rows', () => {
   assert.deepEqual(parseBatchOutput('id\tname\n1\tkim\n2\tlee\n'), { columns: ['id', 'name'], rows: [['1', 'kim'], ['2', 'lee']] });
 });
 
-test('config defaults to the mody-prod ssh alias and rejects shell metacharacters', () => {
+test('config defaults to the mody-prod ssh alias, uses readonly cnf, and rejects shell metacharacters', () => {
   const config = loadConfig({});
   assert.equal(config.sshHost, 'mody-prod');
-  assert.match(buildRemoteCommand(config), /^docker exec -i mody-mysql sh -c/);
+  const cmd = buildRemoteCommand(config);
+  assert.match(cmd, /^docker exec -i mody-mysql sh -c/);
+  assert.match(cmd, /--defaults-extra-file=\/var\/lib\/mysql\/\.mody-readonly\.cnf/);
+  assert.doesNotMatch(cmd, /-uroot|MYSQL_ROOT_PASSWORD/);
   assert.throws(() => loadConfig({ MODY_DB_CONTAINER: 'x; rm -rf /' }));
+  assert.throws(() => loadConfig({ MODY_DB_READONLY_CNF: '/tmp/a; rm -rf /' }));
 });

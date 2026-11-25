@@ -85,6 +85,7 @@ Slack에서 `@Mody Signal 상태 알려줘`로 실행 중인 작업과 대기 �
 | `REPORT_ACTION_ENVIRONMENT` | `dev` 또는 `prod`. `prod`면 버튼 처리를 거절합니다 (`dev`) |
 | `REPORT_ACTION_CHANNEL_IDS` | 버튼을 처리할 채널 ID, 쉼표로 구분. 비우면 채널을 가리지 않습니다 |
 | `MODY_SSH_HOST` · `MODY_DB_CONTAINER` | 운영 DB 조회 도구가 쓰는 SSH 별칭과 MySQL 컨테이너 (`mody-prod` · `mody-mysql`) |
+| `MODY_DB_READONLY_CNF` | 컨테이너 안의 읽기 전용 계정 설정 파일. `SELECT` 권한만 있는 `mody_readonly` 계정 (`/var/lib/mysql/.mody-readonly.cnf`) |
 
 파일 위치는 `AGENT_PROMPT_PATH`, `AGENT_RESULT_SCHEMA_PATH`, `ERROR_ISSUE_CACHE_FILE`, `DAILY_REPORT_STATE_FILE`, `DAILY_INSIGHT_STATE_FILE`, `HANDLED_ALERT_DIRECTORY`, `AGENT_OUTPUT_DIRECTORY`, `AUDIT_DIRECTORY`로 바꿀 수 있습니다. 기본값은 `prompts/`, `config/`, `logs/` 아래입니다.
 
