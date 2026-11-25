@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "title",
+    "content",
+    "targetType",
+    "scheduledAtKst",
+    "deepLink",
+    "copyChecks",
+    "assumptions",
+    "needsClarification"
+  ],
+  "properties": {
+    "title": { "type": "string", "minLength": 1, "maxLength": 100 },
+    "content": { "type": "string", "minLength": 1, "maxLength": 500 },
+    "targetType": {
+      "type": "string",
+      "enum": ["ALL", "ACTIVE_7D", "ACTIVE_30D", "SPECIFIC_MEMBERS"]
+    },
+    "scheduledAtKst": {
+      "type": ["string", "null"],
+      "description": "ISO-8601 KST timestamp e.g. 2026-11-25T19:00:00+09:00, or null if unspecified"
+    },
+    "deepLink": {
+      "type": ["string", "null"],
+      "description": "Internal MODY app route e.g. /home or /records, or null"
+    },
+    "copyChecks": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["hasTypo", "hasAdRisk", "mentionsAppUpdate", "notes"],
+      "properties": {
+        "hasTypo": { "type": "boolean" },
+        "hasAdRisk": { "type": "boolean" },
+        "mentionsAppUpdate": { "type": "boolean" },
+        "notes": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "assumptions": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "needsClarification": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  }
+}
