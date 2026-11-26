@@ -7,7 +7,10 @@ import { promisify } from 'node:util';
 import path from 'node:path';
 import { AuditLog } from './audit-log.js';
 import { collectAttachments, createOutputDirectory, removeOutputDirectory, uploadAttachments } from './attachments.js';
-import { buildAgyArgs, parseAgyOutput } from './agent-cli.js';
+import {
+  parseFallbackProviders,
+  resolveTaskStrategy,
+} from './agent-cli.js';
 import { inferEnvironment, parseAgentResult, renderAgentResult } from './agent-contract.js';
 import { JobQueue } from './job-queue.js';
 import {
@@ -90,8 +93,14 @@ const config = {
   weeklyInsightEnabled: process.env.WEEKLY_INSIGHT_ENABLED !== 'false' && Boolean(process.env.DAILY_REPORT_CHANNEL_ID),
   weeklyInsightStateFile: process.env.WEEKLY_INSIGHT_STATE_FILE ?? path.join(process.cwd(), 'logs', 'weekly-insight.json'),
   useAiAnalysis: process.env.USE_AI_ANALYSIS !== 'false',
+  agentProvider: process.env.AGENT_PROVIDER ?? 'agy',
+  agentFallbackProviders: parseFallbackProviders(process.env.AGENT_FALLBACK_PROVIDERS),
   agyPath: process.env.AGY_PATH ?? path.join(os.homedir(), '.local', 'bin', 'agy'),
+  claudePath: process.env.CLAUDE_PATH ?? 'claude',
+  codexPath: process.env.CODEX_PATH ?? 'codex',
   aiModel: process.env.AI_MODEL ?? 'gemini-4-neon-medium',
+  claudeModel: process.env.CLAUDE_MODEL ?? '',
+  codexModel: process.env.CODEX_MODEL ?? '',
   aiEffort: process.env.AI_EFFORT ?? 'medium',
   aiAnalysisTimeoutMs: Number(process.env.AI_ANALYSIS_TIMEOUT_MS ?? 0),
   skillsPath: process.env.MODY_SKILLS_PATH ?? path.join(os.homedir(), '.codex', 'skills'),
@@ -1319,34 +1328,57 @@ async function runAgent(prompt, {
   addDirs = [],
   skills = MODY_SKILLS,
   settings = '',
-  model = config.aiModel,
+  model = '',
   effort = config.aiEffort,
+  provider = null,
+  readOnly = false,
   label = 'agent',
 } = {}) {
-  const args = buildAgyArgs({
-    prompt,
-    model,
-    effort,
-    timeoutMs,
-    schemaPath,
-    settings,
-    addDirs: [...skills.map((name) => path.join(config.skillsPath, name)), ...addDirs],
+  const attempts = resolveTaskStrategy({
+    label,
+    overrideProvider: provider,
+    defaultProvider: config.agentProvider,
+    fallbackProviders: config.agentFallbackProviders,
+    providerModels: {
+      agy: config.aiModel,
+      claude: config.claudeModel,
+      codex: config.codexModel,
+    },
+    explicitModel: model,
+    explicitEffort: effort,
   });
-  const result = await runCommand(config.agyPath, args, {
-    // agy가 --print-timeout으로 먼저 멈추도록 프로세스 강제 종료는 30초 늦춘다. 0은 무제한.
-    timeoutMs: timeoutMs > 0 ? timeoutMs + 30_000 : 0,
-    env: buildSafeChildEnvironment(process.env, {
-      MODY_REPO_PATH: config.repoPath,
-    }),
-  });
-  const answer = result.exitCode === 0 ? parseAgyOutput(result.stdout) : '';
-  if (!answer) {
-    console.error(`agy ${label} failed:`, trimOutput(result.stderr || result.stdout));
-    return null;
+
+  const combinedDirs = [...skills.map((name) => path.join(config.skillsPath, name)), ...addDirs];
+  const enforceReadOnly = readOnly || Boolean(settings);
+
+  for (const attempt of attempts) {
+    const { adapter } = attempt;
+    const args = adapter.buildArgs({
+      prompt,
+      model: attempt.model,
+      effort: attempt.effort,
+      timeoutMs,
+      schemaPath,
+      settings,
+      readOnly: enforceReadOnly,
+      addDirs: combinedDirs,
+    });
+    const result = await runCommand(adapter.resolveBin(config), args, {
+      // agy가 --print-timeout으로 먼저 멈추도록 프로세스 강제 종료는 30초 늦춘다. 0은 무제한.
+      timeoutMs: timeoutMs > 0 ? timeoutMs + 30_000 : 0,
+      env: buildSafeChildEnvironment(process.env, {
+        MODY_REPO_PATH: config.repoPath,
+      }),
+    });
+    const answer = result.exitCode === 0 ? adapter.parseOutput(result.stdout) : '';
+    if (answer) {
+      // 스키마 결과는 JSON이라 여기서 자르면 파싱이 깨진다. 길이는 renderAgentResult가 맞춘다.
+      return schemaPath ? answer : trimSlackText(answer);
+    }
+    console.error(`${adapter.name} ${label} failed:`, trimOutput(result.stderr || result.stdout));
   }
 
-  // 스키마 결과는 JSON이라 여기서 자르면 파싱이 깨진다. 길이는 renderAgentResult가 맞춘다.
-  return schemaPath ? answer : trimSlackText(answer);
+  return null;
 }
 
 function skillReference(name) {
